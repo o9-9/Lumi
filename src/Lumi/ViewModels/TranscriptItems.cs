@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Lumi.Localization;
@@ -36,6 +37,15 @@ public partial class UserMessageItem : TranscriptItem
     public bool HasAttachments => Attachments.Count > 0;
     public bool HasSkills => Skills.Count > 0;
 
+    /// <summary>Command invoked when user clicks Edit on the message. Sets EditText to current content.</summary>
+    public ICommand BeginEditCommand { get; }
+
+    /// <summary>Command invoked when user confirms an edit. Parameter is the new text string.</summary>
+    public ICommand ConfirmEditCommand { get; }
+
+    /// <summary>Command invoked when user clicks Regenerate/Retry on the message.</summary>
+    public ICommand ResendCommand { get; }
+
     public UserMessageItem(ChatMessageViewModel source, bool showTimestamps, Action<ChatMessage>? resendAction = null)
     {
         _source = source;
@@ -44,6 +54,10 @@ public partial class UserMessageItem : TranscriptItem
         _timestampText = showTimestamps ? source.TimestampText : "";
         Attachments = source.Message.Attachments.Select(fp => new FileAttachmentItem(fp)).ToList();
         Skills = source.Message.ActiveSkills.ToList();
+
+        BeginEditCommand = new RelayCommand(() => { /* Strata handles entering edit mode internally */ });
+        ConfirmEditCommand = new RelayCommand<string>(text => EditAndResend(text ?? Content));
+        ResendCommand = new RelayCommand(ResendFromMessage);
     }
 
     public void ResendFromMessage() => _resendAction?.Invoke(_source.Message);

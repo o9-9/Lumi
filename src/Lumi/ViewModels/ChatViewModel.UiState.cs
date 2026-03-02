@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +12,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Lumi.Localization;
 using Lumi.Models;
+using Lumi.Services;
 using StrataTheme.Controls;
 
 namespace Lumi.ViewModels;
@@ -19,8 +22,12 @@ public partial class ChatViewModel
     private bool _suppressComposerAgentSync;
     private bool _suppressComposerProjectSync;
     private CancellationTokenSource? _fileSearchCts;
+    private readonly VoiceInputService _voiceService = new();
+    private string _textBeforeVoice = "";
+    private bool _voiceStarting;
 
     [ObservableProperty] private bool _sendWithEnter = true;
+    [ObservableProperty] private bool _isRecording;
     [ObservableProperty] private string? _selectedAgentName;
     [ObservableProperty] private string _selectedAgentGlyph = "◉";
     [ObservableProperty] private string? _selectedProjectName;
@@ -344,5 +351,167 @@ public partial class ChatViewModel
             ActiveMcpServerNames.Clear();
             SyncActiveMcpsToChat();
         }
+    }
+
+    // ── Voice input ──────────────────────────────────────
+
+    [RelayCommand]
+    private async Task ToggleVoice()
+    {
+        if (!_voiceService.IsAvailable || _voiceStarting)
+            return;
+
+        if (_voiceService.IsRecording)
+        {
+            await _voiceService.StopAsync();
+            IsRecording = false;
+            return;
+        }
+
+        _voiceStarting = true;
+        _textBeforeVoice = PromptText ?? "";
+
+        _voiceService.HypothesisGenerated += OnVoiceHypothesis;
+        _voiceService.ResultGenerated += OnVoiceResult;
+        _voiceService.Stopped += OnVoiceStopped;
+        _voiceService.Error += OnVoiceError;
+
+        var culture = CultureInfo.CurrentUICulture;
+        var language = culture.Name.Contains('-') ? culture.Name : culture.IetfLanguageTag;
+        if (string.IsNullOrEmpty(language) || !language.Contains('-'))
+            language = "en-US";
+
+        await _voiceService.StartAsync(language);
+
+        _voiceStarting = false;
+        if (_voiceService.IsRecording)
+            IsRecording = true;
+
+        FocusComposerRequested?.Invoke();
+    }
+
+    private void OnVoiceHypothesis(string text)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var baseText = _textBeforeVoice;
+            if (!string.IsNullOrEmpty(baseText) && !baseText.EndsWith(' '))
+                baseText += " ";
+            PromptText = baseText + text;
+        });
+    }
+
+    private void OnVoiceResult(string text)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var baseText = _textBeforeVoice;
+            if (!string.IsNullOrEmpty(baseText) && !baseText.EndsWith(' '))
+                baseText += " ";
+            _textBeforeVoice = baseText + text;
+            PromptText = _textBeforeVoice;
+        });
+    }
+
+    private void OnVoiceError(string message)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            StatusText = message == "speech_privacy"
+                ? Loc.Voice_SpeechPrivacyRequired
+                : $"{Loc.Voice_Error}: {message}";
+        });
+    }
+
+    private void OnVoiceStopped()
+    {
+        _voiceService.HypothesisGenerated -= OnVoiceHypothesis;
+        _voiceService.ResultGenerated -= OnVoiceResult;
+        _voiceService.Stopped -= OnVoiceStopped;
+        _voiceService.Error -= OnVoiceError;
+
+        Dispatcher.UIThread.Post(() => IsRecording = false);
+    }
+
+    /// <summary>Cleans up voice resources. Called when the view is being detached.</summary>
+    public void StopVoiceIfRecording()
+    {
+        if (_voiceService.IsRecording)
+        {
+            _ = _voiceService.StopAsync();
+            IsRecording = false;
+        }
+    }
+
+    /// <summary>Raised when the composer should receive focus (e.g., after attaching files or voice toggle).</summary>
+    public event Action? FocusComposerRequested;
+
+    // ── Attach files (requires view interaction for file picker) ──
+
+    /// <summary>Raised when user requests file attachment. The view handles the file picker dialog.</summary>
+    public event Action? AttachFilesRequested;
+
+    [RelayCommand]
+    private void RequestAttachFiles()
+    {
+        AttachFilesRequested?.Invoke();
+    }
+
+    // ── Chip removal commands (bound via Strata ICommand properties) ──
+
+    [RelayCommand]
+    private void RemoveAgent()
+    {
+        ApplyComposerAgentSelection(null);
+    }
+
+    [RelayCommand]
+    private void RemoveProject()
+    {
+        SelectedProjectName = null;
+    }
+
+    [RelayCommand]
+    private void RemoveSkill(string? name)
+    {
+        if (!string.IsNullOrWhiteSpace(name))
+            RemoveSkillByName(name);
+    }
+
+    [RelayCommand]
+    private void RemoveMcp(string? name)
+    {
+        if (!string.IsNullOrWhiteSpace(name))
+            RemoveMcpByName(name);
+    }
+
+    // ── File autocomplete commands ──
+
+    [RelayCommand]
+    private void HandleFileQuery(string? query)
+    {
+        HandleFileQueryChanged(query ?? "");
+    }
+
+    [RelayCommand]
+    private void HandleFileSelection(string? filePath)
+    {
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            HandleFileSelected(filePath);
+            FocusComposerRequested?.Invoke();
+        }
+    }
+
+    // ── Clipboard paste (View handles actual clipboard access, ViewModel handles attachment) ──
+
+    /// <summary>Raised when the composer detects a clipboard image paste.
+    /// The view should read the clipboard, save the image, and call <see cref="AddAttachment"/>.</summary>
+    public event Action? ClipboardPasteRequested;
+
+    [RelayCommand]
+    private void RequestClipboardPaste()
+    {
+        ClipboardPasteRequested?.Invoke();
     }
 }
