@@ -1752,7 +1752,7 @@ public partial class ChatViewModel : ObservableObject
         ActiveMcpChips.Clear();
         PendingAttachments.Clear();
         PendingAttachmentItems.Clear();
-        AvailableFileSuggestions.Clear();
+        AvailableFileSuggestions = null;
         _fileSearchCts?.Cancel();
         _fileSearchCts?.Dispose();
         _fileSearchCts = null;

@@ -32,7 +32,7 @@ public partial class ChatViewModel
     public ObservableCollection<StrataComposerChip> AvailableSkillChips { get; } = [];
     public ObservableCollection<StrataComposerChip> AvailableMcpChips { get; } = [];
     public ObservableCollection<StrataComposerChip> AvailableProjectChips { get; } = [];
-    public ObservableCollection<StrataComposerChip> AvailableFileSuggestions { get; } = [];
+    [ObservableProperty] private IEnumerable<StrataComposerChip>? _availableFileSuggestions;
     public ObservableCollection<FileAttachmentItem> PendingAttachmentItems { get; } = [];
 
     public bool IsWelcomeVisible => CurrentChat is null;
@@ -118,33 +118,34 @@ public partial class ChatViewModel
 
         var cts = new CancellationTokenSource();
         _fileSearchCts = cts;
+        var token = cts.Token;
 
         _ = Task.Run(async () =>
         {
             try
             {
                 // A small debounce avoids filesystem churn while the user is still typing.
-                await Task.Delay(90, cts.Token);
-                if (cts.Token.IsCancellationRequested)
+                await Task.Delay(90, token);
+                if (token.IsCancellationRequested)
                     return;
 
                 var results = SearchFiles(query);
-                if (cts.Token.IsCancellationRequested)
+                if (token.IsCancellationRequested)
                     return;
 
                 Dispatcher.UIThread.Post(() =>
                 {
-                    if (cts.Token.IsCancellationRequested)
+                    if (token.IsCancellationRequested)
                         return;
 
-                    ReplaceCollection(AvailableFileSuggestions, results);
+                    AvailableFileSuggestions = results;
                 }, DispatcherPriority.Background);
             }
             catch (OperationCanceledException)
             {
                 // Expected when query changes quickly.
             }
-        }, cts.Token);
+        }, token);
     }
 
     public void HandleFileSelected(string filePath)
