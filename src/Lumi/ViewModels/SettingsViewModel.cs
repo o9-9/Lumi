@@ -70,6 +70,8 @@ public partial class SettingsViewModel : ObservableObject
 
     // ── AI & Models ──
     [ObservableProperty] private string _preferredModel;
+    [ObservableProperty] private string _reasoningEffort;
+    [ObservableProperty] private int _reasoningEffortIndex; // 0=Auto, 1=Low, 2=Medium, 3=High, 4=Extra High
     public ObservableCollection<string> AvailableModels { get; } = [];
 
     // ── GitHub Account ──
@@ -144,6 +146,8 @@ public partial class SettingsViewModel : ObservableObject
 
         // AI
         _preferredModel = s.PreferredModel;
+        _reasoningEffort = s.ReasoningEffort;
+        _reasoningEffortIndex = s.ReasoningEffort switch { "low" => 1, "medium" => 2, "high" => 3, "xhigh" => 4, _ => 0 };
         if (!string.IsNullOrWhiteSpace(_preferredModel))
             AvailableModels.Add(_preferredModel);
 
@@ -196,6 +200,12 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnAutoGenerateTitlesChanged(bool value) { _dataStore.Data.Settings.AutoGenerateTitles = value; Save(); NotifyModified(); }
 
     partial void OnPreferredModelChanged(string value) { _dataStore.Data.Settings.PreferredModel = value; Save(); SettingsChanged?.Invoke(); NotifyModified(); }
+    partial void OnReasoningEffortIndexChanged(int value)
+    {
+        var effort = value switch { 1 => "low", 2 => "medium", 3 => "high", 4 => "xhigh", _ => "" };
+        ReasoningEffort = effort;
+    }
+    partial void OnReasoningEffortChanged(string value) { _dataStore.Data.Settings.ReasoningEffort = value; Save(); SettingsChanged?.Invoke(); NotifyModified(); }
 
     public void UpdateAvailableModels(System.Collections.Generic.List<string> models)
     {
@@ -254,6 +264,7 @@ public partial class SettingsViewModel : ObservableObject
     public bool IsExpandReasoningWhileStreamingModified => ExpandReasoningWhileStreaming != _defaults.ExpandReasoningWhileStreaming;
     public bool IsAutoGenerateTitlesModified => AutoGenerateTitles != _defaults.AutoGenerateTitles;
     public bool IsPreferredModelModified => PreferredModel != _defaults.PreferredModel;
+    public bool IsReasoningEffortModified => ReasoningEffort != _defaults.ReasoningEffort;
     public bool IsEnableMemoryAutoSaveModified => EnableMemoryAutoSave != _defaults.EnableMemoryAutoSave;
     public bool IsAutoSaveChatsModified => AutoSaveChats != _defaults.AutoSaveChats;
 
@@ -275,6 +286,7 @@ public partial class SettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(IsExpandReasoningWhileStreamingModified));
         OnPropertyChanged(nameof(IsAutoGenerateTitlesModified));
         OnPropertyChanged(nameof(IsPreferredModelModified));
+        OnPropertyChanged(nameof(IsReasoningEffortModified));
         OnPropertyChanged(nameof(IsEnableMemoryAutoSaveModified));
         OnPropertyChanged(nameof(IsAutoSaveChatsModified));
     }
@@ -296,6 +308,7 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand] private void RevertExpandReasoningWhileStreaming() => ExpandReasoningWhileStreaming = _defaults.ExpandReasoningWhileStreaming;
     [RelayCommand] private void RevertAutoGenerateTitles() => AutoGenerateTitles = _defaults.AutoGenerateTitles;
     [RelayCommand] private void RevertPreferredModel() => PreferredModel = _defaults.PreferredModel;
+    [RelayCommand] private void RevertReasoningEffort() => ReasoningEffort = _defaults.ReasoningEffort;
     [RelayCommand] private void RevertEnableMemoryAutoSave() => EnableMemoryAutoSave = _defaults.EnableMemoryAutoSave;
     [RelayCommand] private void RevertAutoSaveChats() => AutoSaveChats = _defaults.AutoSaveChats;
 
@@ -399,6 +412,7 @@ public partial class SettingsViewModel : ObservableObject
         ShowReasoning = defaults.ShowReasoning;
         AutoGenerateTitles = defaults.AutoGenerateTitles;
         PreferredModel = defaults.PreferredModel;
+        ReasoningEffort = defaults.ReasoningEffort;
         EnableMemoryAutoSave = defaults.EnableMemoryAutoSave;
         AutoSaveChats = defaults.AutoSaveChats;
         NeedsRestart = false;

@@ -44,6 +44,7 @@ public class CopilotService : IAsyncDisposable
         List<CustomAgentConfig>? customAgents = null,
         List<AIFunction>? tools = null,
         Dictionary<string, object>? mcpServers = null,
+        string? reasoningEffort = null,
         CancellationToken ct = default)
     {
         if (_client is null) throw new InvalidOperationException("Not connected");
@@ -59,6 +60,9 @@ public class CopilotService : IAsyncDisposable
                 Enabled = true,
             }
         };
+
+        if (!string.IsNullOrWhiteSpace(reasoningEffort))
+            config.ReasoningEffort = reasoningEffort;
 
         if (!string.IsNullOrWhiteSpace(systemPrompt))
         {
@@ -93,6 +97,7 @@ public class CopilotService : IAsyncDisposable
         List<CustomAgentConfig>? customAgents = null,
         List<AIFunction>? tools = null,
         Dictionary<string, object>? mcpServers = null,
+        string? reasoningEffort = null,
         CancellationToken ct = default)
     {
         if (_client is null) throw new InvalidOperationException("Not connected");
@@ -108,6 +113,9 @@ public class CopilotService : IAsyncDisposable
                 Enabled = true,
             }
         };
+
+        if (!string.IsNullOrWhiteSpace(reasoningEffort))
+            config.ReasoningEffort = reasoningEffort;
 
         if (!string.IsNullOrWhiteSpace(systemPrompt))
         {

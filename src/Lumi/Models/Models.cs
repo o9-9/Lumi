@@ -149,6 +149,7 @@ public class UserSettings
 
     // ── AI & Models ──
     public string PreferredModel { get; set; } = "";
+    public string ReasoningEffort { get; set; } = ""; // "", "low", "medium", "high", "xhigh"
 
     // ── Privacy & Data ──
     public bool EnableMemoryAutoSave { get; set; } = true;

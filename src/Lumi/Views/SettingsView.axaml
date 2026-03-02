@@ -263,6 +263,11 @@
                       SelectedItem="{Binding PreferredModel, Mode=TwoWay}"
                       Width="220" IsEditable="True" />
           </sc:StrataSetting>
+          <sc:StrataSetting Header="{loc:Str Setting_ReasoningEffort}" Description="{loc:Str SettingDesc_ReasoningEffort}"
+                            IsModified="{Binding IsReasoningEffortModified}">
+            <ComboBox x:Name="ReasoningEffortCombo" Width="220"
+                      SelectedIndex="{Binding ReasoningEffortIndex}" />
+          </sc:StrataSetting>
         </sc:StrataSettingGroup>
       </StackPanel>
 

@@ -1551,11 +1551,13 @@ public partial class ChatViewModel : ObservableObject
         var customTools = BuildCustomTools();
         var mcpServers = BuildMcpServers();
         var workDir = GetWorkingDirectory();
+        var reasoningEffort = _dataStore.Data.Settings.ReasoningEffort;
+        var effort = string.IsNullOrWhiteSpace(reasoningEffort) ? null : reasoningEffort;
 
         if (chat.CopilotSessionId is null)
         {
             var session = await _copilotService.CreateSessionAsync(
-                systemPrompt, SelectedModel, workDir, skillDirs, customAgents, customTools, mcpServers, ct);
+                systemPrompt, SelectedModel, workDir, skillDirs, customAgents, customTools, mcpServers, effort, ct);
             chat.CopilotSessionId = session.SessionId;
             _activeSession = session;
             SubscribeToSession(session, chat);
@@ -1565,7 +1567,7 @@ public partial class ChatViewModel : ObservableObject
             try
             {
                 var session = await _copilotService.ResumeSessionAsync(
-                    chat.CopilotSessionId, systemPrompt, SelectedModel, workDir, skillDirs, customAgents, customTools, mcpServers, ct);
+                    chat.CopilotSessionId, systemPrompt, SelectedModel, workDir, skillDirs, customAgents, customTools, mcpServers, effort, ct);
                 _activeSession = session;
                 SubscribeToSession(session, chat);
             }
@@ -1574,7 +1576,7 @@ public partial class ChatViewModel : ObservableObject
                 // Session expired or broken — fall back to a fresh session
                 StatusText = Loc.Status_SessionExpired;
                 var session = await _copilotService.CreateSessionAsync(
-                    systemPrompt, SelectedModel, workDir, skillDirs, customAgents, customTools, mcpServers, ct);
+                    systemPrompt, SelectedModel, workDir, skillDirs, customAgents, customTools, mcpServers, effort, ct);
                 chat.CopilotSessionId = session.SessionId;
                 _activeSession = session;
                 SubscribeToSession(session, chat);
