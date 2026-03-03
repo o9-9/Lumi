@@ -171,6 +171,10 @@ public partial class ChatViewModel : ObservableObject
             }
         };
 
+        // When the CopilotService reconnects (new CLI process), all cached sessions
+        // are invalid — they reference the old, dead client.
+        _copilotService.Reconnected += OnCopilotReconnected;
+
         InitializeMvvmUiState();
     }
 
@@ -946,6 +950,49 @@ public partial class ChatViewModel : ObservableObject
         _lastSuggestedAssistantMessageByChat.Remove(chatId);
     }
 
+    /// <summary>Called when the CopilotService reconnects (new CLI process).
+    /// All cached sessions are from the old process and must be discarded.</summary>
+    private void OnCopilotReconnected()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            // Dispose all event subscriptions
+            foreach (var sub in _sessionSubs.Values)
+                sub.Dispose();
+            _sessionSubs.Clear();
+
+            // Clear session cache (objects reference the dead client)
+            _sessionCache.Clear();
+            _activeSession = null;
+
+            // Reset CopilotSessionId on all chats so sessions are recreated
+            foreach (var chat in _dataStore.Data.Chats)
+                chat.CopilotSessionId = null;
+
+            // Cancel any in-flight requests
+            foreach (var cts in _ctsSources.Values)
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+            _ctsSources.Clear();
+
+            // Reset busy state on all runtimes
+            foreach (var runtime in _runtimeStates.Values)
+            {
+                runtime.IsBusy = false;
+                runtime.IsStreaming = false;
+                runtime.StatusText = "";
+            }
+
+            _inProgressMessages.Clear();
+
+            IsBusy = false;
+            IsStreaming = false;
+            StatusText = "";
+        });
+    }
+
     private ChatRuntimeState GetOrCreateRuntimeState(Guid chatId)
     {
         if (!_runtimeStates.TryGetValue(chatId, out var runtime))
@@ -1419,6 +1466,15 @@ public partial class ChatViewModel : ObservableObject
             {
                 oldCts.Cancel();
                 oldCts.Dispose();
+
+                // Abort the session so the SDK fully stops the old turn before
+                // we send a new one. Without this, two concurrent SendAsync calls
+                // end up on the same session, corrupting SDK state.
+                if (_sessionCache.TryGetValue(chatId, out var cachedSession))
+                {
+                    try { await cachedSession.AbortAsync(); }
+                    catch { /* best-effort */ }
+                }
             }
             cts = new CancellationTokenSource();
             _ctsSources[chatId] = cts;
@@ -1900,6 +1956,12 @@ public partial class ChatViewModel : ObservableObject
             {
                 oldCts.Cancel();
                 oldCts.Dispose();
+
+                if (_sessionCache.TryGetValue(chatId, out var cachedSession))
+                {
+                    try { await cachedSession.AbortAsync(); }
+                    catch { /* best-effort */ }
+                }
             }
             var cts = new CancellationTokenSource();
             _ctsSources[chatId] = cts;

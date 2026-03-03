@@ -16,17 +16,56 @@ public class CopilotService : IAsyncDisposable
 {
     private CopilotClient? _client;
     private List<ModelInfo>? _models;
+    private long _connectionGeneration;
+
+    /// <summary>Fires after the CopilotClient has been replaced (reconnection).
+    /// Consumers should discard any cached CopilotSession objects.</summary>
+    public event Action? Reconnected;
 
     public bool IsConnected => _client?.State == ConnectionState.Connected;
 
+    /// <summary>Monotonically increasing generation counter. Changes every time a
+    /// new CopilotClient is created, allowing consumers to detect stale sessions.</summary>
+    public long ConnectionGeneration => Interlocked.Read(ref _connectionGeneration);
+
     public async Task ConnectAsync(CancellationToken ct = default)
     {
+        var oldClient = _client;
+
         _client = new CopilotClient(new CopilotClientOptions
         {
-            LogLevel = "error"
+            LogLevel = "error",
+            AutoRestart = true,
         });
 
         await _client.StartAsync(ct);
+        Interlocked.Increment(ref _connectionGeneration);
+
+        // Dispose the old client (stops the old CLI process) after the new one is ready.
+        if (oldClient is not null)
+        {
+            Reconnected?.Invoke();
+            try { await oldClient.DisposeAsync(); }
+            catch { /* best-effort */ }
+        }
+    }
+
+    /// <summary>Pings the CLI process with a timeout. Returns false if
+    /// the client is missing, disconnected, or unresponsive.</summary>
+    public async Task<bool> IsHealthyAsync(TimeSpan? timeout = null)
+    {
+        if (_client is null || _client.State != ConnectionState.Connected)
+            return false;
+        try
+        {
+            using var cts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(8));
+            await _client.PingAsync(cancellationToken: cts.Token);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public async Task<List<ModelInfo>> GetModelsAsync(CancellationToken ct = default)
