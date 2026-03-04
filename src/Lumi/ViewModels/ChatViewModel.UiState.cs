@@ -37,7 +37,7 @@ public partial class ChatViewModel
 
     // ── Session Mode (Interactive / Plan / Autopilot) ──
     private static readonly string[] ModeLabels = ["💬 Ask", "📋 Plan", "⚡ Agent"];
-    [ObservableProperty] private string _sessionMode = "interactive";
+    [ObservableProperty] private string _sessionMode = "autopilot";
     [ObservableProperty] private object? _selectedMode;
     [ObservableProperty] private bool _hasPlan;
     [ObservableProperty] private string? _planContent;
