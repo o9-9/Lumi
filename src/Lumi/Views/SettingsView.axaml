@@ -254,6 +254,12 @@
                       x:Name="SignInButton" />
             </StackPanel>
           </sc:StrataSetting>
+          <sc:StrataSetting Header="Usage Quota" Description="Your Copilot usage quota for the current billing period."
+                            IsVisible="{Binding QuotaDisplayText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Text="{Binding QuotaDisplayText}" FontSize="{DynamicResource Font.SizeCaption}"
+                       Foreground="{DynamicResource Brush.TextSecondary}"
+                       VerticalAlignment="Center" />
+          </sc:StrataSetting>
         </sc:StrataSettingGroup>
 
         <sc:StrataSettingGroup Header="{loc:Str SettingsGroup_Model}">

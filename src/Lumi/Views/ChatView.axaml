@@ -401,6 +401,8 @@
                                Models="{Binding AvailableModels}"
                                SelectedModel="{Binding SelectedModel, Mode=TwoWay}"
                                QualityLevels="{Binding QualityLevels}"
+                               Modes="{Binding AvailableModes}"
+                               SelectedMode="{Binding SelectedMode, Mode=TwoWay}"
                                SuggestionA="{loc:Str Chat_SuggestionA}"
                                SuggestionB="{loc:Str Chat_SuggestionB}"
                                SuggestionC="{loc:Str Chat_SuggestionC}"
@@ -475,6 +477,8 @@
           </DockPanel>
         </sc:StrataChatShell.Header>
 
+
+
         <sc:StrataChatShell.Transcript>
           <sc:StrataChatTranscript x:Name="Transcript"
                                   ItemsSource="{Binding TranscriptItems}" />
@@ -482,6 +486,37 @@
 
         <sc:StrataChatShell.Composer>
           <StackPanel Spacing="4">
+            <!-- Plan panel (visible when a plan exists) -->
+            <Border x:Name="PlanPanel" IsVisible="{Binding HasPlan}"
+                    Background="{DynamicResource Brush.SurfaceSubtle}"
+                    CornerRadius="8" Padding="12,8" Margin="0,0,0,4">
+              <StackPanel Spacing="4">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                    <Button Classes="subtle" Padding="6,2" FontSize="11"
+                            Command="{Binding RefreshPlanCommand}" ToolTip.Tip="Refresh plan">
+                      <TextBlock Text="↻" />
+                    </Button>
+                    <Button Classes="subtle" Padding="6,2" FontSize="11"
+                            Command="{Binding DeletePlanCommand}" ToolTip.Tip="Delete plan">
+                      <TextBlock Text="✕" />
+                    </Button>
+                    <ToggleButton x:Name="PlanExpandToggle" Classes="subtle" Padding="6,2" FontSize="11"
+                                  IsChecked="{Binding IsPlanExpanded}" ToolTip.Tip="Expand/collapse plan">
+                      <TextBlock Text="▾" />
+                    </ToggleButton>
+                  </StackPanel>
+                  <TextBlock Classes="caption" FontWeight="SemiBold"
+                             Foreground="{DynamicResource Brush.AccentDefault}"
+                             Text="📋 Plan" VerticalAlignment="Center" />
+                </DockPanel>
+                <sc:StrataMarkdown x:Name="PlanMarkdown"
+                                   IsVisible="{Binding IsPlanExpanded}"
+                                   Markdown="{Binding PlanContent}"
+                                   MaxHeight="200" />
+              </StackPanel>
+            </Border>
+
             <sc:StrataAttachmentList ShowAddButton="False"
                                      ItemsSource="{Binding PendingAttachmentItems}"
                                      IsVisible="{Binding HasPendingAttachments}">
@@ -515,6 +550,8 @@
                                   Models="{Binding AvailableModels}"
                                   SelectedModel="{Binding SelectedModel, Mode=TwoWay}"
                                   QualityLevels="{Binding QualityLevels}"
+                                  Modes="{Binding AvailableModes}"
+                                  SelectedMode="{Binding SelectedMode, Mode=TwoWay}"
                                   SuggestionA="{Binding SuggestionA}"
                                   SuggestionB="{Binding SuggestionB}"
                                   SuggestionC="{Binding SuggestionC}"

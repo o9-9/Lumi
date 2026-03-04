@@ -87,6 +87,7 @@ public partial class ChatViewModel
 
         SyncComposerProjectSelectionFromState();
         RefreshProjectBadge();
+        RefreshComposerCatalogs(); // Re-scan workspace agents/skills for the new project
     }
 
     private Guid? _pendingProjectId;
@@ -135,8 +136,8 @@ public partial class ChatViewModel
 
         SyncComposerProjectSelectionFromState();
         RefreshProjectBadge();
+        RefreshComposerCatalogs(); // Re-scan to remove workspace agents/skills
     }
-
     public void AddSkill(Skill skill)
     {
         if (ActiveSkillIds.Contains(skill.Id)) return;
@@ -148,16 +149,28 @@ public partial class ChatViewModel
         SyncActiveSkillsToChat();
     }
 
+    /// <summary>Workspace skill names currently active for this chat (from .github/skills/).</summary>
+    private readonly List<string> _activeWorkspaceSkillNames = new();
+
     /// <summary>Registers a skill ID without adding a chip (composer already added it).</summary>
     public void RegisterSkillIdByName(string name)
     {
         var skill = _dataStore.Data.Skills.FirstOrDefault(s => s.Name == name);
-        if (skill is null || ActiveSkillIds.Contains(skill.Id)) return;
-        ActiveSkillIds.Add(skill.Id);
-        // If added to an existing chat with a session, inject via next message
-        if (CurrentChat?.CopilotSessionId is not null)
-            _pendingSkillInjections.Add(skill.Id);
-        SyncActiveSkillsToChat();
+        if (skill is not null)
+        {
+            if (ActiveSkillIds.Contains(skill.Id)) return;
+            ActiveSkillIds.Add(skill.Id);
+            // If added to an existing chat with a session, inject via next message
+            if (CurrentChat?.CopilotSessionId is not null)
+                _pendingSkillInjections.Add(skill.Id);
+            SyncActiveSkillsToChat();
+        }
+        else
+        {
+            // Workspace skill (from .github/skills/) — track by name persistently
+            if (!_activeWorkspaceSkillNames.Contains(name))
+                _activeWorkspaceSkillNames.Add(name);
+        }
     }
 
     private void SyncActiveSkillsToChat()

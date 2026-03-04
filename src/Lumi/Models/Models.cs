@@ -51,6 +51,12 @@ public class Chat : INotifyPropertyChanged
     public List<Guid> ActiveSkillIds { get; set; } = [];
     public List<string> ActiveMcpServerNames { get; set; } = [];
 
+    /// <summary>Persisted session mode: "interactive", "plan", or "autopilot".</summary>
+    public string? SessionMode { get; set; }
+
+    /// <summary>Name of an SDK-discovered agent selected for this chat (not a Lumi agent).</summary>
+    public string? SdkAgentName { get; set; }
+
     /// <summary>Runtime-only flag indicating this chat is actively generating a response.</summary>
     [JsonIgnore]
     public bool IsRunning
@@ -170,6 +176,12 @@ public class UserSettings
 
     // ── Browser ──
     public bool HasImportedBrowserCookies { get; set; }
+
+    // ── Quota (cached, refreshed periodically) ──
+    [JsonIgnore] public double? QuotaRemainingPercentage { get; set; }
+    [JsonIgnore] public double? QuotaUsedRequests { get; set; }
+    [JsonIgnore] public double? QuotaEntitlementRequests { get; set; }
+    [JsonIgnore] public string? QuotaResetDate { get; set; }
 }
 
 public class AppData

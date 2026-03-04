@@ -133,6 +133,76 @@ public class CopilotService : IAsyncDisposable
         await session.Rpc.Agent.DeselectAsync(ct);
     }
 
+    // ── Mode API ──
+
+    /// <summary>Gets the current session mode (Interactive, Plan, or Autopilot).</summary>
+    public async Task<GitHub.Copilot.SDK.Rpc.SessionModeGetResultMode> GetSessionModeAsync(
+        CopilotSession session, CancellationToken ct = default)
+    {
+        var result = await session.Rpc.Mode.GetAsync(ct);
+        return result.Mode;
+    }
+
+    /// <summary>Sets the session mode (Interactive, Plan, or Autopilot).</summary>
+    public async Task SetSessionModeAsync(
+        CopilotSession session, GitHub.Copilot.SDK.Rpc.SessionModeGetResultMode mode, CancellationToken ct = default)
+    {
+        await session.Rpc.Mode.SetAsync(mode, ct);
+    }
+
+    // ── Plan API ──
+
+    /// <summary>Reads the current plan content from the session.</summary>
+    public async Task<(bool Exists, string? Content)> ReadSessionPlanAsync(
+        CopilotSession session, CancellationToken ct = default)
+    {
+        var result = await session.Rpc.Plan.ReadAsync(ct);
+        return (result.Exists == true, result.Content);
+    }
+
+    /// <summary>Updates the plan content for the session.</summary>
+    public async Task UpdateSessionPlanAsync(
+        CopilotSession session, string content, CancellationToken ct = default)
+    {
+        await session.Rpc.Plan.UpdateAsync(content, ct);
+    }
+
+    /// <summary>Deletes the current plan from the session.</summary>
+    public async Task DeleteSessionPlanAsync(
+        CopilotSession session, CancellationToken ct = default)
+    {
+        await session.Rpc.Plan.DeleteAsync(ct);
+    }
+
+    // ── Model API (mid-session switching) ──
+
+    /// <summary>Switches the model mid-session without recreating it.</summary>
+    public async Task<string?> SwitchSessionModelAsync(
+        CopilotSession session, string modelId, CancellationToken ct = default)
+    {
+        var result = await session.Rpc.Model.SwitchToAsync(modelId, ct);
+        return result.ModelId;
+    }
+
+    // ── Account API ──
+
+    /// <summary>Gets the current account quota information.</summary>
+    public async Task<GitHub.Copilot.SDK.Rpc.AccountGetQuotaResult?> GetAccountQuotaAsync(CancellationToken ct = default)
+    {
+        if (_client is null) return null;
+        return await _client.Rpc.Account.GetQuotaAsync(ct);
+    }
+
+    // ── Tools API ──
+
+    /// <summary>Lists all available tools for the current model.</summary>
+    public async Task<List<GitHub.Copilot.SDK.Rpc.Tool>> ListToolsAsync(string? model = null, CancellationToken ct = default)
+    {
+        if (_client is null) return [];
+        var result = await _client.Rpc.Tools.ListAsync(model, ct);
+        return result.Tools;
+    }
+
     /// <summary>
     /// Launches the Copilot CLI login flow (OAuth device flow) and waits for completion.
     /// </summary>

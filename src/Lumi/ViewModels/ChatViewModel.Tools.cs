@@ -95,9 +95,9 @@ public partial class ChatViewModel
             allServers = allServers.Where(s => agentServerIds.Contains(s.Id)).ToList();
         }
 
-        if (allServers.Count == 0) return null;
-
         var dict = new Dictionary<string, object>();
+
+        // Add Lumi-configured MCP servers
         foreach (var server in allServers)
         {
             if (server.ServerType == "remote")
@@ -131,7 +131,60 @@ public partial class ChatViewModel
                 dict[server.Name] = local;
             }
         }
-        return dict;
+
+        // Add workspace MCP servers from .vscode/mcp.json (VS Code convention)
+        MergeWorkspaceMcpServers(workDir, dict);
+
+        return dict.Count > 0 ? dict : null;
+    }
+
+    /// <summary>
+    /// Reads .vscode/mcp.json from the working directory and merges any servers
+    /// not already present into the MCP server dictionary. This allows workspace
+    /// MCP configs (VS Code convention) to be available in Copilot sessions.
+    /// </summary>
+    private static void MergeWorkspaceMcpServers(string workDir, Dictionary<string, object> dict)
+    {
+        var mcpJsonPath = Path.Combine(workDir, ".vscode", "mcp.json");
+        if (!File.Exists(mcpJsonPath)) return;
+
+        try
+        {
+            var json = File.ReadAllText(mcpJsonPath);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+            if (!doc.RootElement.TryGetProperty("servers", out var servers)) return;
+
+            foreach (var server in servers.EnumerateObject())
+            {
+                if (dict.ContainsKey(server.Name)) continue; // Lumi config takes precedence
+
+                if (server.Value.TryGetProperty("type", out var typeProp))
+                {
+                    var type = typeProp.GetString() ?? "stdio";
+                    if (type == "stdio")
+                    {
+                        var command = server.Value.TryGetProperty("command", out var cmdProp) ? cmdProp.GetString() ?? "" : "";
+                        var args = new List<string>();
+                        if (server.Value.TryGetProperty("args", out var argsProp))
+                        {
+                            foreach (var arg in argsProp.EnumerateArray())
+                                args.Add(arg.GetString() ?? "");
+                        }
+
+                        dict[server.Name] = new McpLocalServerConfig
+                        {
+                            Command = command,
+                            Args = args,
+                            Type = "stdio",
+                            Cwd = workDir,
+                            Tools = ["*"]
+                        };
+                    }
+                }
+            }
+        }
+        catch { /* best effort — malformed JSON or missing fields */ }
     }
 
     private List<AIFunction> BuildWebTools()
@@ -261,6 +314,24 @@ public partial class ChatViewModel
         if (string.IsNullOrWhiteSpace(value)) return;
         _dataStore.Data.Settings.PreferredModel = value;
         _ = SaveIndexAsync();
+
+        // Mid-session model switch via SDK API (avoids session invalidation)
+        if (_activeSession is not null)
+            _ = SwitchModelMidSessionAsync(value);
+    }
+
+    private async Task SwitchModelMidSessionAsync(string modelId)
+    {
+        if (_activeSession is null) return;
+        try
+        {
+            await _copilotService.SwitchSessionModelAsync(_activeSession, modelId);
+        }
+        catch
+        {
+            // Fallback: SDK may not support mid-session switch for all models.
+            // The next SendMessage will create/resume with the new model.
+        }
     }
 
     private List<AIFunction> BuildUIAutomationTools()

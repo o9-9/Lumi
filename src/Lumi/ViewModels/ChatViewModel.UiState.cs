@@ -35,6 +35,24 @@ public partial class ChatViewModel
     [ObservableProperty] private string? _agentBadgeText;
     [ObservableProperty] private string[]? _qualityLevels;
 
+    // ── Session Mode (Interactive / Plan / Autopilot) ──
+    private static readonly string[] ModeLabels = ["💬 Ask", "📋 Plan", "⚡ Agent"];
+    [ObservableProperty] private string _sessionMode = "interactive";
+    [ObservableProperty] private object? _selectedMode;
+    [ObservableProperty] private bool _hasPlan;
+    [ObservableProperty] private string? _planContent;
+    [ObservableProperty] private bool _isPlanExpanded;
+    public string[] AvailableModes => ModeLabels;
+
+    // ── SDK-discovered agents ──
+    [ObservableProperty] private string? _selectedSdkAgentName;
+    public ObservableCollection<StrataComposerChip> SdkAgentChips { get; } = [];
+
+    // ── Account Quota ──
+    [ObservableProperty] private string? _quotaDisplayText;
+    [ObservableProperty] private double _quotaRemainingPercent = 100;
+    [ObservableProperty] private bool _isQuotaLow;
+
     public ObservableCollection<StrataComposerChip> AvailableAgentChips { get; } = [];
     public ObservableCollection<StrataComposerChip> AvailableSkillChips { get; } = [];
     public ObservableCollection<StrataComposerChip> AvailableMcpChips { get; } = [];
@@ -78,6 +96,7 @@ public partial class ChatViewModel
     private void InitializeMvvmUiState()
     {
         SendWithEnter = _dataStore.Data.Settings.SendWithEnter;
+        SetSessionModeSilent("autopilot"); // Default to Agent mode
 
         ActiveSkillChips.CollectionChanged += OnActiveSkillChipsCollectionChanged;
         ActiveMcpChips.CollectionChanged += OnActiveMcpChipsCollectionChanged;
@@ -93,21 +112,49 @@ public partial class ChatViewModel
 
     public void RefreshComposerCatalogs()
     {
-        ReplaceCollection(AvailableAgentChips,
-            _dataStore.Data.Agents
-                .OrderBy(a => a.Name)
-                .Select(a => new StrataComposerChip(a.Name, a.IconGlyph)));
+        // Start with Lumi agents
+        var agentChips = _dataStore.Data.Agents
+            .OrderBy(a => a.Name)
+            .Select(a => new StrataComposerChip(a.Name, a.IconGlyph))
+            .ToList();
 
-        ReplaceCollection(AvailableSkillChips,
-            _dataStore.Data.Skills
-                .OrderBy(s => s.Name)
-                .Select(s => new StrataComposerChip(s.Name, s.IconGlyph)));
+        // Start with Lumi skills
+        var skillChips = _dataStore.Data.Skills
+            .OrderBy(s => s.Name)
+            .Select(s => new StrataComposerChip(s.Name, s.IconGlyph))
+            .ToList();
 
-        ReplaceCollection(AvailableMcpChips,
-            _dataStore.Data.McpServers
-                .Where(s => s.IsEnabled)
-                .OrderBy(s => s.Name)
-                .Select(s => new StrataComposerChip(s.Name)));
+        // Discover workspace agents/skills from .github directory
+        var workDir = GetEffectiveWorkingDirectory();
+        DiscoverWorkspaceItems(workDir, agentChips, skillChips);
+
+        ReplaceCollection(AvailableAgentChips, agentChips);
+        ReplaceCollection(AvailableSkillChips, skillChips);
+
+        // Build MCP chips: Lumi-configured MCPs + workspace MCPs from .vscode/mcp.json
+        var mcpChips = _dataStore.Data.McpServers
+            .Where(s => s.IsEnabled)
+            .OrderBy(s => s.Name)
+            .Select(s => new StrataComposerChip(s.Name))
+            .ToList();
+        var workspaceMcpNames = DiscoverWorkspaceMcps(workDir, mcpChips);
+        ReplaceCollection(AvailableMcpChips, mcpChips);
+
+        // Remove stale workspace MCPs from the previous project, then add current ones
+        var staleWorkspaceMcps = ActiveMcpChips.OfType<StrataComposerChip>().Where(c => c.Glyph == "🔌").ToList();
+        foreach (var stale in staleWorkspaceMcps)
+        {
+            ActiveMcpServerNames.Remove(stale.Name);
+            ActiveMcpChips.Remove(stale);
+        }
+        foreach (var name in workspaceMcpNames)
+        {
+            if (!ActiveMcpServerNames.Contains(name))
+            {
+                ActiveMcpServerNames.Add(name);
+                ActiveMcpChips.Add(new StrataComposerChip(name, "🔌"));
+            }
+        }
 
         ReplaceCollection(AvailableProjectChips,
             _dataStore.Data.Projects
@@ -116,6 +163,142 @@ public partial class ChatViewModel
 
         SyncComposerProjectSelectionFromState();
         RefreshProjectBadge();
+    }
+
+    /// <summary>
+    /// Discovers workspace agents and skills from the .github directory.
+    /// Supports two GitHub Copilot skill conventions:
+    ///   1. Flat: .github/skills/*.md (e.g., benchmark.md)
+    ///   2. Folder: .github/Skills/&lt;name&gt;/SKILL.md (e.g., fluentsearch-translate/SKILL.md)
+    /// Agent convention: .github/agents/*.md
+    /// The SDK discovers these via ConfigDir when creating a session.
+    /// </summary>
+    private static void DiscoverWorkspaceItems(
+        string workDir, List<StrataComposerChip> agentChips, List<StrataComposerChip> skillChips)
+    {
+        var githubDir = Path.Combine(workDir, ".github");
+        if (!Directory.Exists(githubDir)) return;
+
+        var existingAgentNames = agentChips.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existingSkillNames = skillChips.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Discover agents — .github/agents/*.md (case-insensitive lookup)
+        var agentsDir = FindSubdirectory(githubDir, "agents");
+        if (agentsDir is not null)
+        {
+            foreach (var file in Directory.GetFiles(agentsDir, "*.md"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (!existingAgentNames.Contains(name))
+                    agentChips.Add(new StrataComposerChip(name, "🤖"));
+            }
+        }
+
+        // Discover skills (case-insensitive lookup for both "skills" and "Skills")
+        var skillsDir = FindSubdirectory(githubDir, "skills");
+        if (skillsDir is not null)
+        {
+            // Pattern 1: flat files — .github/skills/*.md
+            foreach (var file in Directory.GetFiles(skillsDir, "*.md"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (!existingSkillNames.Contains(name))
+                    skillChips.Add(new StrataComposerChip(name, "⚡"));
+            }
+
+            // Pattern 2: subdirectories with SKILL.md — .github/Skills/<name>/SKILL.md
+            foreach (var dir in Directory.GetDirectories(skillsDir))
+            {
+                var skillFile = Path.Combine(dir, "SKILL.md");
+                if (File.Exists(skillFile))
+                {
+                    var name = Path.GetFileName(dir);
+                    if (!existingSkillNames.Contains(name))
+                        skillChips.Add(new StrataComposerChip(name, "⚡"));
+                }
+            }
+        }
+    }
+
+    /// <summary>Finds a subdirectory by name, case-insensitive.</summary>
+    private static string? FindSubdirectory(string parentDir, string name)
+    {
+        var exact = Path.Combine(parentDir, name);
+        if (Directory.Exists(exact)) return exact;
+
+        // Case-insensitive fallback
+        try
+        {
+            foreach (var dir in Directory.GetDirectories(parentDir))
+            {
+                if (string.Equals(Path.GetFileName(dir), name, StringComparison.OrdinalIgnoreCase))
+                    return dir;
+            }
+        }
+        catch { /* best effort */ }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Discovers MCP servers from .vscode/mcp.json in the workspace directory
+    /// and adds them to the MCP chip list. Returns the names of discovered workspace MCPs.
+    /// </summary>
+    private static List<string> DiscoverWorkspaceMcps(string workDir, List<StrataComposerChip> mcpChips)
+    {
+        var discovered = new List<string>();
+        var mcpJsonPath = Path.Combine(workDir, ".vscode", "mcp.json");
+        if (!File.Exists(mcpJsonPath)) return discovered;
+
+        var existingNames = mcpChips.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var json = File.ReadAllText(mcpJsonPath);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+            if (!doc.RootElement.TryGetProperty("servers", out var servers)) return discovered;
+
+            foreach (var server in servers.EnumerateObject())
+            {
+                if (!existingNames.Contains(server.Name))
+                {
+                    mcpChips.Add(new StrataComposerChip(server.Name, "🔌"));
+                    discovered.Add(server.Name);
+                }
+            }
+        }
+        catch { /* best effort */ }
+
+        return discovered;
+    }
+
+    /// <summary>
+    /// After a real session is created, queries the SDK to discover additional agents
+    /// and merges them into the composer pickers.
+    /// </summary>
+    private async Task PopulateFromSessionAsync()
+    {
+        if (_activeSession is null) return;
+
+        try
+        {
+            var agents = await _copilotService.ListSessionAgentsAsync(_activeSession);
+
+            var lumiAgentNames = _dataStore.Data.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var currentChips = AvailableAgentChips.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var sdkOnly = agents.Where(a => !lumiAgentNames.Contains(a.Name) && !currentChips.Contains(a.Name)).ToList();
+
+            if (sdkOnly.Count > 0)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    foreach (var agent in sdkOnly.OrderBy(a => a.DisplayName ?? a.Name))
+                        AvailableAgentChips.Add(new StrataComposerChip(agent.DisplayName ?? agent.Name, "🤖"));
+                });
+            }
+        }
+        catch { /* best effort */ }
     }
 
     public void HandleFileQueryChanged(string query)
@@ -205,23 +388,37 @@ public partial class ChatViewModel
             return;
         }
 
-        if (string.Equals(ActiveAgent?.Name, value, StringComparison.Ordinal))
+        if (string.Equals(ActiveAgent?.Name, value, StringComparison.Ordinal)
+            && string.Equals(SelectedSdkAgentName, value, StringComparison.Ordinal))
             return;
 
         if (string.IsNullOrWhiteSpace(value))
         {
             SetActiveAgent(null);
+            SelectedSdkAgentName = null;
             return;
         }
 
+        // First check Lumi agents
         var agent = _dataStore.Data.Agents.FirstOrDefault(a => a.Name == value);
-        if (agent is null)
+        if (agent is not null)
         {
-            SyncComposerAgentSelectionFromState();
+            SelectedSdkAgentName = null; // Clear SDK agent when switching to Lumi agent
+            SetActiveAgent(agent);
             return;
         }
 
-        SetActiveAgent(agent);
+        // Not a Lumi agent — check if it's an SDK workspace agent
+        // (identified by presence in AvailableAgentChips with 🤖 glyph)
+        var isSdkAgent = AvailableAgentChips.Any(c => c.Name == value && c.Glyph == "🤖");
+        if (isSdkAgent)
+        {
+            SetActiveAgent(null); // Clear Lumi agent when switching to SDK agent
+            SelectedSdkAgentName = value;
+            return;
+        }
+
+        SyncComposerAgentSelectionFromState();
     }
 
     partial void OnSelectedProjectNameChanged(string? value)
@@ -255,8 +452,9 @@ public partial class ChatViewModel
         _suppressComposerAgentSync = true;
         try
         {
-            SelectedAgentName = ActiveAgent?.Name;
-            SelectedAgentGlyph = ActiveAgent?.IconGlyph ?? "◉";
+            // Prefer SDK agent name if set, otherwise use Lumi agent
+            SelectedAgentName = SelectedSdkAgentName ?? ActiveAgent?.Name;
+            SelectedAgentGlyph = SelectedSdkAgentName is not null ? "🤖" : (ActiveAgent?.IconGlyph ?? "◉");
         }
         finally
         {
@@ -285,7 +483,10 @@ public partial class ChatViewModel
 
     private void RefreshAgentBadge()
     {
-        AgentBadgeText = ActiveAgent is null ? null : $"{ActiveAgent.IconGlyph} {ActiveAgent.Name}";
+        if (SelectedSdkAgentName is not null)
+            AgentBadgeText = $"🤖 {SelectedSdkAgentName}";
+        else
+            AgentBadgeText = ActiveAgent is null ? null : $"{ActiveAgent.IconGlyph} {ActiveAgent.Name}";
     }
 
     private static void ReplaceCollection<T>(ObservableCollection<T> target, IEnumerable<T> values)
@@ -508,5 +709,172 @@ public partial class ChatViewModel
     private void RequestClipboardPaste()
     {
         ClipboardPasteRequested?.Invoke();
+    }
+
+    // ── Session Mode commands ──
+
+    private bool _suppressModeSync;
+
+    partial void OnSelectedModeChanged(object? value)
+    {
+        if (_suppressModeSync || value is not string label) return;
+
+        var mode = label switch
+        {
+            "📋 Plan" => "plan",
+            "⚡ Agent" => "autopilot",
+            _ => "interactive"
+        };
+
+        if (SessionMode != mode)
+            SessionMode = mode;
+    }
+
+    partial void OnSessionModeChanged(string value)
+    {
+        if (_suppressModeSync) return;
+
+        // Sync the ComboBox label
+        var label = value switch
+        {
+            "plan" => ModeLabels[1],
+            "autopilot" => ModeLabels[2],
+            _ => ModeLabels[0]
+        };
+        if (SelectedMode is not string current || current != label)
+        {
+            _suppressModeSync = true;
+            try { SelectedMode = label; }
+            finally { _suppressModeSync = false; }
+        }
+
+        if (CurrentChat is not null)
+        {
+            CurrentChat.SessionMode = value;
+            QueueSaveChat(CurrentChat, saveIndex: false);
+        }
+
+        if (_activeSession is not null)
+        {
+            var sdkMode = value switch
+            {
+                "plan" => GitHub.Copilot.SDK.Rpc.SessionModeGetResultMode.Plan,
+                "autopilot" => GitHub.Copilot.SDK.Rpc.SessionModeGetResultMode.Autopilot,
+                _ => GitHub.Copilot.SDK.Rpc.SessionModeGetResultMode.Interactive
+            };
+            _ = SetSessionModeAsync(sdkMode);
+        }
+    }
+
+    /// <summary>Sets SessionMode without triggering the SDK call (for event-driven or load-time sync).</summary>
+    private void SetSessionModeSilent(string mode)
+    {
+        _suppressModeSync = true;
+        try
+        {
+            SessionMode = mode;
+            SelectedMode = mode switch
+            {
+                "plan" => ModeLabels[1],
+                "autopilot" => ModeLabels[2],
+                _ => ModeLabels[0]
+            };
+        }
+        finally { _suppressModeSync = false; }
+    }
+
+    private async Task SetSessionModeAsync(GitHub.Copilot.SDK.Rpc.SessionModeGetResultMode mode)
+    {
+        if (_activeSession is null) return;
+        try
+        {
+            await _copilotService.SetSessionModeAsync(_activeSession, mode);
+        }
+        catch { /* best effort */ }
+    }
+
+    [RelayCommand]
+    private async Task RefreshPlan()
+    {
+        if (_activeSession is null) return;
+        try
+        {
+            var (exists, content) = await _copilotService.ReadSessionPlanAsync(_activeSession);
+            HasPlan = exists;
+            PlanContent = content;
+            if (exists) IsPlanExpanded = true;
+        }
+        catch { /* best effort */ }
+    }
+
+    [RelayCommand]
+    private async Task DeletePlan()
+    {
+        if (_activeSession is null) return;
+        try
+        {
+            await _copilotService.DeleteSessionPlanAsync(_activeSession);
+            HasPlan = false;
+            PlanContent = null;
+            IsPlanExpanded = false;
+        }
+        catch { /* best effort */ }
+    }
+
+    // ── SDK-discovered agent commands ──
+
+    partial void OnSelectedSdkAgentNameChanged(string? value)
+    {
+        SyncComposerAgentSelectionFromState();
+        RefreshAgentBadge();
+
+        if (CurrentChat is not null)
+        {
+            CurrentChat.SdkAgentName = value;
+            QueueSaveChat(CurrentChat, saveIndex: false);
+        }
+    }
+
+    [RelayCommand]
+    private void ClearSdkAgent()
+    {
+        SelectedSdkAgentName = null;
+    }
+
+    // ── Account Quota ──
+
+    public async Task RefreshQuotaAsync()
+    {
+        try
+        {
+            var quota = await _copilotService.GetAccountQuotaAsync();
+            if (quota?.QuotaSnapshots is not { Count: > 0 }) return;
+
+            // Use the first (primary) quota snapshot
+            var snapshot = quota.QuotaSnapshots.Values.First();
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                QuotaRemainingPercent = snapshot.RemainingPercentage;
+                IsQuotaLow = QuotaRemainingPercent < 20;
+
+                var used = snapshot.UsedRequests;
+                var total = snapshot.EntitlementRequests;
+                var reset = snapshot.ResetDate;
+
+                if (total > 0)
+                    QuotaDisplayText = $"{used:N0} / {total:N0} requests ({QuotaRemainingPercent:N0}% remaining)";
+                else
+                    QuotaDisplayText = $"{QuotaRemainingPercent:N0}% remaining";
+
+                // Cache in settings for display
+                var settings = _dataStore.Data.Settings;
+                settings.QuotaRemainingPercentage = snapshot.RemainingPercentage;
+                settings.QuotaUsedRequests = snapshot.UsedRequests;
+                settings.QuotaEntitlementRequests = snapshot.EntitlementRequests;
+                settings.QuotaResetDate = reset;
+            });
+        }
+        catch { /* best effort */ }
     }
 }

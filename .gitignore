@@ -37,3 +37,9 @@ bench-*.json
 
 ## Local MCP test harness (temporary)
 test-mcp/
+
+## Copilot CLI session state (local runtime data)
+session-state/
+session-store.db
+session-store.db-shm
+session-store.db-wal

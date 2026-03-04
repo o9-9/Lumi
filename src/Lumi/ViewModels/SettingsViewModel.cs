@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -78,6 +79,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _isAuthenticated;
     [ObservableProperty] private string _gitHubLogin = "";
     [ObservableProperty] private bool _isSigningIn;
+    [ObservableProperty] private string? _quotaDisplayText;
 
     // ── Privacy & Data ──
     [ObservableProperty] private bool _enableMemoryAutoSave;
@@ -240,6 +242,29 @@ public partial class SettingsViewModel : ObservableObject
             IsAuthenticated = false;
             GitHubLogin = "";
         }
+
+        // Also refresh quota
+        await RefreshQuotaAsync();
+    }
+
+    public async Task RefreshQuotaAsync()
+    {
+        try
+        {
+            var quota = await _copilotService.GetAccountQuotaAsync();
+            if (quota?.QuotaSnapshots is not { Count: > 0 }) return;
+
+            var snapshot = quota.QuotaSnapshots.Values.First();
+            var used = snapshot.UsedRequests;
+            var total = snapshot.EntitlementRequests;
+            var remaining = snapshot.RemainingPercentage;
+
+            if (total > 0)
+                QuotaDisplayText = $"{used:N0} / {total:N0} requests ({remaining:N0}% remaining)";
+            else
+                QuotaDisplayText = $"{remaining:N0}% remaining";
+        }
+        catch { /* best effort */ }
     }
 
     partial void OnEnableMemoryAutoSaveChanged(bool value) { _dataStore.Data.Settings.EnableMemoryAutoSave = value; Save(); SettingsChanged?.Invoke(); NotifyModified(); }

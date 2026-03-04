@@ -672,7 +672,20 @@ public partial class ChatViewModel : ObservableObject
                     {
                         runtime.StatusText = string.Format(Loc.Status_Warning, warn.Data.WarningType);
                         if (_activeSession == session)
+                        {
                             StatusText = runtime.StatusText;
+                            // Surface the warning as a visible chat message
+                            var warnMsg = new ChatMessage
+                            {
+                                Role = "system",
+                                Author = "⚠ Warning",
+                                Content = warn.Data.Message
+                            };
+                            chat.Messages.Add(warnMsg);
+                            Messages.Add(new ChatMessageViewModel(warnMsg));
+                            _transcriptBuilder.ProcessMessageToTranscript(Messages[^1]);
+                            ScrollToEndRequested?.Invoke();
+                        }
                     });
                     break;
 
@@ -917,13 +930,46 @@ public partial class ChatViewModel : ObservableObject
                     break;
 
                 case SessionContextChangedEvent:
-                case SessionModeChangedEvent:
-                case SessionPlanChangedEvent:
                 case SessionWorkspaceFileChangedEvent:
                 case PendingMessagesModifiedEvent:
                 case SessionHandoffEvent:
                 case SessionInfoEvent:
                     // Acknowledged but no UI action needed currently
+                    break;
+
+                case SessionModeChangedEvent modeChanged:
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        var newMode = modeChanged.Data.NewMode?.ToLowerInvariant() ?? "interactive";
+                        if (_activeSession == session)
+                            SetSessionModeSilent(newMode);
+                        if (chat.SessionMode != newMode)
+                        {
+                            chat.SessionMode = newMode;
+                            QueueSaveChat(chat, saveIndex: false);
+                        }
+                    });
+                    break;
+
+                case SessionPlanChangedEvent planChanged:
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (_activeSession != session) return;
+                        switch (planChanged.Data.Operation)
+                        {
+                            case SessionPlanChangedDataOperation.Create:
+                            case SessionPlanChangedDataOperation.Update:
+                                HasPlan = true;
+                                IsPlanExpanded = true;
+                                _ = RefreshPlan();
+                                break;
+                            case SessionPlanChangedDataOperation.Delete:
+                                HasPlan = false;
+                                PlanContent = null;
+                                IsPlanExpanded = false;
+                                break;
+                        }
+                    });
                     break;
             }
         });
@@ -1048,6 +1094,23 @@ public partial class ChatViewModel : ObservableObject
             : null;
         var systemPrompt = SystemPromptBuilder.Build(
             _dataStore.Data.Settings, ActiveAgent, project, allSkills, activeSkills, memories);
+
+        // If a workspace agent (from .github/agents/) is selected, load its content and append to system prompt
+        var workspaceAgentName = chat.SdkAgentName ?? SelectedSdkAgentName;
+        if (!string.IsNullOrWhiteSpace(workspaceAgentName) && ActiveAgent is null)
+        {
+            var agentDir = GetEffectiveWorkingDirectory();
+            var agentFile = Path.Combine(agentDir, ".github", "agents", workspaceAgentName + ".md");
+            if (File.Exists(agentFile))
+            {
+                try
+                {
+                    var agentContent = await File.ReadAllTextAsync(agentFile, ct);
+                    systemPrompt = (systemPrompt ?? "") + "\n\n--- Active Agent: " + workspaceAgentName + " ---\n" + agentContent;
+                }
+                catch { /* best effort */ }
+            }
+        }
 
         var skillDirs = new List<string>();
         if (ActiveSkillIds.Count > 0)
@@ -1236,6 +1299,7 @@ public partial class ChatViewModel : ObservableObject
 
             // Clear pending state from any previous chat
             _pendingSkillInjections.Clear();
+        _activeWorkspaceSkillNames.Clear();
             _pendingSearchSources.Clear();
             _transcriptBuilder.PendingFetchedSkillRefs.Clear();
 
@@ -1316,6 +1380,24 @@ public partial class ChatViewModel : ObservableObject
             ActiveAgent = chat.AgentId.HasValue
                 ? _dataStore.Data.Agents.FirstOrDefault(a => a.Id == chat.AgentId.Value)
                 : null;
+
+            // Restore session mode from chat
+            SetSessionModeSilent(chat.SessionMode ?? "interactive");
+
+            // Restore SDK agent selection
+            SelectedSdkAgentName = chat.SdkAgentName;
+
+            // Refresh SDK agents if we have a session
+            if (_activeSession is not null)
+            {
+                _ = PopulateFromSessionAsync();
+                _ = RefreshPlanAsync(chat);
+            }
+            else
+            {
+                HasPlan = false;
+                PlanContent = null;
+            }
         }
         catch (OperationCanceledException) when (loadToken.IsCancellationRequested)
         {
@@ -1333,6 +1415,19 @@ public partial class ChatViewModel : ObservableObject
             }
             loadCts.Dispose();
         }
+    }
+
+    /// <summary>Refreshes plan state for a chat when a session is available.</summary>
+    private async Task RefreshPlanAsync(Chat chat)
+    {
+        if (_activeSession is null) return;
+        try
+        {
+            var (exists, content) = await _copilotService.ReadSessionPlanAsync(_activeSession);
+            HasPlan = exists;
+            PlanContent = content;
+        }
+        catch { /* best effort */ }
     }
 
     public void ClearChat()
@@ -1372,8 +1467,17 @@ public partial class ChatViewModel : ObservableObject
         PopulateDefaultMcps();
         _pendingProjectId = null;
         _pendingSkillInjections.Clear();
+        _activeWorkspaceSkillNames.Clear();
         StatusText = "";
         ActiveAgent = null;
+
+        // Reset mode/plan/SDK agent state
+        SetSessionModeSilent("interactive");
+        HasPlan = false;
+        PlanContent = null;
+        IsPlanExpanded = false;
+        SelectedSdkAgentName = null;
+        SdkAgentChips.Clear();
 
         SyncComposerProjectSelectionFromState();
         RefreshProjectBadge();
@@ -1388,6 +1492,7 @@ public partial class ChatViewModel : ObservableObject
         {
             InvalidateCurrentSession();
             _pendingSkillInjections.Clear();
+        _activeWorkspaceSkillNames.Clear();
         }
     }
 
@@ -1434,7 +1539,9 @@ public partial class ChatViewModel : ObservableObject
                 AgentId = ActiveAgent?.Id,
                 ProjectId = _pendingProjectId ?? ActiveProjectFilterId,
                 ActiveSkillIds = new List<Guid>(ActiveSkillIds),
-                ActiveMcpServerNames = new List<string>(ActiveMcpServerNames)
+                ActiveMcpServerNames = new List<string>(ActiveMcpServerNames),
+                SessionMode = SessionMode != "interactive" ? SessionMode : null,
+                SdkAgentName = SelectedSdkAgentName
             };
             _pendingProjectId = null;
             _dataStore.Data.Chats.Add(chat);
@@ -1501,10 +1608,38 @@ public partial class ChatViewModel : ObservableObject
 
                 // If a custom agent is selected, route the session through it via the SDK Agent API
                 if (ActiveAgent is not null && _activeSession is not null)
-                    await _copilotService.SelectSessionAgentAsync(_activeSession, ActiveAgent.Name, cts.Token);
+                {
+                    try { await _copilotService.SelectSessionAgentAsync(_activeSession, ActiveAgent.Name, cts.Token); }
+                    catch { /* Lumi agents may not be selectable via SDK Agent API — they work via system prompt */ }
+                }
+
+                // Workspace agents (.github/agents/) are handled via system prompt injection
+                // in EnsureSessionAsync — no Agent.SelectAsync needed.
+
+                // Restore session mode if persisted on chat
+                if (!string.IsNullOrWhiteSpace(CurrentChat.SessionMode) && CurrentChat.SessionMode != "interactive" && _activeSession is not null)
+                {
+                    var sdkMode = CurrentChat.SessionMode switch
+                    {
+                        "plan" => GitHub.Copilot.SDK.Rpc.SessionModeGetResultMode.Plan,
+                        "autopilot" => GitHub.Copilot.SDK.Rpc.SessionModeGetResultMode.Autopilot,
+                        _ => GitHub.Copilot.SDK.Rpc.SessionModeGetResultMode.Interactive
+                    };
+                    try { await _copilotService.SetSessionModeAsync(_activeSession, sdkMode, cts.Token); }
+                    catch { /* best effort */ }
+                }
+
+                // Discover SDK agents in background (non-blocking)
+                _ = PopulateFromSessionAsync();
+                // Refresh quota in background
+                _ = RefreshQuotaAsync();
             }
 
             var sendOptions = new MessageOptions { Prompt = prompt };
+
+            // Set per-message mode if not the default interactive
+            if (!string.IsNullOrWhiteSpace(SessionMode) && SessionMode != "interactive")
+                sendOptions.Mode = SessionMode;
 
             // Inject newly activated skills as context in the message (explicit activation in existing chat)
             if (_pendingSkillInjections.Count > 0)
@@ -1521,8 +1656,16 @@ public partial class ChatViewModel : ObservableObject
                     var skillContext = "\n\n--- Activated Skills (apply these to help with the request) ---\n";
                     foreach (var skill in injectedSkills)
                         skillContext += $"\n### {skill!.Name}\n{skill.Content}\n";
-                    sendOptions.Prompt = prompt + skillContext;
+                    sendOptions.Prompt += skillContext;
                 }
+            }
+
+            // Inject workspace skill references (from .github/skills/) — instruct LLM to use fetch_skill
+            if (_activeWorkspaceSkillNames.Count > 0)
+            {
+                var skillNames = string.Join(", ", _activeWorkspaceSkillNames.Select(n => $"\"{n}\""));
+                sendOptions.Prompt += $"\n\n[Use the following skills to help with this request: {skillNames}. " +
+                                      "Retrieve each skill's content using the fetch_skill tool before proceeding.]";
             }
 
             if (attachments is { Count: > 0 })
@@ -2132,3 +2275,6 @@ public partial class ChatMessageViewModel : ObservableObject
         ToolStatus = Message.ToolStatus;
     }
 }
+
+
+

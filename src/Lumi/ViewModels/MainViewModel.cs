@@ -182,6 +182,12 @@ public partial class MainViewModel : ObservableObject
             SettingsVM.UpdateAvailableModels(modelIds);
             if (isCleanState && selected is not null)
                 SettingsVM.PreferredModel = selected;
+
+            // Refresh account quota in background
+            _ = ChatVM.RefreshQuotaAsync();
+
+            // Refresh catalogs now that connection is established (discovers workspace agents)
+            ChatVM.RefreshComposerCatalogs();
         }
         catch (Exception ex)
         {
