@@ -26,6 +26,7 @@ public partial class DiffView : UserControl
     private TextBlock? _changeCountText;
     private Button? _prevBtn;
     private Button? _nextBtn;
+    private Panel? _loadingOverlay;
 
     private readonly List<double> _changeOffsets = [];
     private int _currentChangeIndex = -1;
@@ -39,6 +40,7 @@ public partial class DiffView : UserControl
         _changeCountText = this.FindControl<TextBlock>("ChangeCountText");
         _prevBtn = this.FindControl<Button>("PrevChangeBtn");
         _nextBtn = this.FindControl<Button>("NextChangeBtn");
+        _loadingOverlay = this.FindControl<Panel>("LoadingOverlay");
 
         if (_prevBtn is not null) _prevBtn.Click += (_, _) => NavigateChange(-1);
         if (_nextBtn is not null) _nextBtn.Click += (_, _) => NavigateChange(1);
@@ -55,17 +57,8 @@ public partial class DiffView : UserControl
         _changeOffsets.Clear();
         _currentChangeIndex = -1;
 
-        // Show loading indicator
-        var loadingBar = new Avalonia.Controls.ProgressBar
-        {
-            IsIndeterminate = true, Width = 140, Height = 3,
-            Margin = new Avalonia.Thickness(0, 32, 0, 0),
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-        };
-        _diffContent.Children.Add(loadingBar);
-
-        // Yield to let UI render the loading indicator before heavy work starts
-        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+        // Show centered loading overlay
+        if (_loadingOverlay is not null) _loadingOverlay.IsVisible = true;
 
         var isDark = Application.Current?.ActualThemeVariant == ThemeVariant.Dark;
         var filePath = fileChange.FilePath;
@@ -76,7 +69,7 @@ public partial class DiffView : UserControl
         var ext = Path.GetExtension(filePath)?.TrimStart('.');
         var language = ext ?? "";
 
-        // Heavy work on background thread: file I/O + change detection
+        // Heavy work on background thread: file I/O + change detection + tokenization
         var result = await Task.Run(() =>
         {
             string content;
@@ -84,7 +77,7 @@ public partial class DiffView : UserControl
             catch { content = ""; }
 
             if (string.IsNullOrEmpty(content))
-                return (Lines: Array.Empty<string>(), ChangedLines: new HashSet<int>());
+                return (Lines: Array.Empty<string>(), ChangedLines: new HashSet<int>(), TokenizedLines: Array.Empty<TokenizedLine>());
 
             var lines = content.Split('\n');
             var changed = new HashSet<int>();
@@ -99,19 +92,27 @@ public partial class DiffView : UserControl
                 for (int i = 0; i < lines.Length; i++)
                     changed.Add(i);
 
-            return (Lines: lines, ChangedLines: changed);
+            // Tokenize all lines on background thread (TextMate is not UI-bound)
+            var tokenized = TokenizeLines(lines, language, isDark);
+
+            return (Lines: lines, ChangedLines: changed, TokenizedLines: tokenized);
         });
 
-        // Back on UI thread: clear loading and build visual controls
-        _diffContent.Children.Clear();
         if (result.Lines.Length == 0)
         {
+            if (_loadingOverlay is not null) _loadingOverlay.IsVisible = false;
             UpdateStats(fileChange.LinesAdded, fileChange.LinesRemoved);
             UpdateNavigation();
             return;
         }
 
-        BuildFileView(result.Lines, language, isDark, result.ChangedLines);
+        // Yield to ensure loading overlay renders before heavy UI control creation
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+
+        // Build UI controls in batches so the loading animation stays alive
+        await BuildFileViewAsync(result.Lines, isDark, result.ChangedLines, result.TokenizedLines);
+
+        if (_loadingOverlay is not null) _loadingOverlay.IsVisible = false;
         UpdateStats(fileChange.LinesAdded, fileChange.LinesRemoved);
         UpdateNavigation();
 
@@ -125,6 +126,79 @@ public partial class DiffView : UserControl
                     _diffScroller.Offset = new Vector(0, Math.Max(0, _changeOffsets[0] - 40));
             }, DispatcherPriority.Loaded);
         }
+    }
+
+    /// <summary>Pre-tokenized line data produced on background thread.</summary>
+    private readonly record struct TokenRun(int Start, int End, int FgColorId, int FontStyleBits);
+    private readonly record struct TokenizedLine(TokenRun[] Runs);
+
+    /// <summary>Tokenizes all lines using TextMate on a background thread.</summary>
+    private static TokenizedLine[] TokenizeLines(string[] lines, string language, bool isDark)
+    {
+        var (options, registry) = GetRegistryPair(isDark);
+        IGrammar? grammar = null;
+        if (!string.IsNullOrWhiteSpace(language))
+            grammar = StrataCodeBlock.ResolveGrammar(options, registry, language);
+        Theme? theme = grammar is not null ? registry.GetTheme() : null;
+
+        var result = new TokenizedLine[lines.Length];
+        IStateStack? ruleStack = null;
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var lineText = lines[i].TrimEnd('\r');
+            if (grammar is null || theme is null || string.IsNullOrEmpty(lineText))
+            {
+                // Advance ruleStack for blank lines to keep state consistent
+                if (grammar is not null)
+                {
+                    try { ruleStack = grammar.TokenizeLine(lineText, ruleStack, TimeSpan.FromMilliseconds(50))?.RuleStack ?? ruleStack; }
+                    catch { }
+                }
+                result[i] = new TokenizedLine([]);
+                continue;
+            }
+
+            try
+            {
+                var tokenResult = grammar.TokenizeLine(lineText, ruleStack, TimeSpan.FromMilliseconds(200));
+                if (tokenResult?.Tokens is { Length: > 0 })
+                {
+                    ruleStack = tokenResult.RuleStack;
+                    var runs = new TokenRun[tokenResult.Tokens.Length];
+                    for (int j = 0; j < tokenResult.Tokens.Length; j++)
+                    {
+                        var token = tokenResult.Tokens[j];
+                        int start = token.StartIndex;
+                        int end = (j + 1 < tokenResult.Tokens.Length) ? tokenResult.Tokens[j + 1].StartIndex : lineText.Length;
+                        if (start >= lineText.Length) { runs[j] = new TokenRun(0, 0, 0, -1); continue; }
+                        if (end > lineText.Length) end = lineText.Length;
+
+                        int fgColorId = 0;
+                        int fontStyleBits = -1;
+                        var rules = theme.Match(token.Scopes);
+                        if (rules is not null)
+                            foreach (var rule in rules)
+                            {
+                                if (rule.foreground > 0) fgColorId = rule.foreground;
+                                if ((int)rule.fontStyle >= 0) fontStyleBits = (int)rule.fontStyle;
+                            }
+                        runs[j] = new TokenRun(start, end, fgColorId, fontStyleBits);
+                    }
+                    result[i] = new TokenizedLine(runs);
+                }
+                else
+                {
+                    ruleStack = tokenResult?.RuleStack ?? ruleStack;
+                    result[i] = new TokenizedLine([]);
+                }
+            }
+            catch
+            {
+                result[i] = new TokenizedLine([]);
+            }
+        }
+        return result;
     }
 
     /// <summary>Finds which line indices contain the given newText and adds them to changedLines.</summary>
@@ -183,12 +257,13 @@ public partial class DiffView : UserControl
         return normIdx == normalizedIdx ? origIdx : -1;
     }
 
-    private void BuildFileView(string[] lines, string language, bool isDark, HashSet<int> changedLines)
+    private async Task BuildFileViewAsync(string[] lines, bool isDark, HashSet<int> changedLines, TokenizedLine[] tokenizedLines)
     {
         if (_diffContent is null) return;
 
         var monoFont = new FontFamily("Cascadia Code, Cascadia Mono, Consolas, Courier New, monospace");
         const double fontSize = 12.5;
+        const int batchSize = 30;
 
         var changeBg = isDark
             ? new SolidColorBrush(Color.FromArgb(30, 63, 185, 80))
@@ -206,15 +281,10 @@ public partial class DiffView : UserControl
             ? new SolidColorBrush(Color.FromArgb(180, 63, 185, 80))
             : new SolidColorBrush(Color.FromArgb(200, 0, 140, 0));
 
-        // Resolve grammar for syntax highlighting
-        var (options, registry) = GetRegistryPair(isDark);
-        IGrammar? grammar = null;
-        if (!string.IsNullOrWhiteSpace(language))
-            grammar = StrataCodeBlock.ResolveGrammar(options, registry, language);
-        Theme? theme = grammar is not null ? registry.GetTheme() : null;
-        var brushMap = grammar is not null ? GetBrushMap(isDark) : null;
+        var brushMap = GetBrushMap(isDark);
+        var (_, registry) = GetRegistryPair(isDark);
+        Theme? theme = registry.GetTheme();
 
-        IStateStack? ruleStack = null;
         bool inChangeRegion = false;
 
         for (int i = 0; i < lines.Length; i++)
@@ -233,14 +303,19 @@ public partial class DiffView : UserControl
                 inChangeRegion = false;
             }
 
+            var tokenized = i < tokenizedLines.Length ? tokenizedLines[i] : new TokenizedLine([]);
             var row = BuildHighlightedLine(
-                lineText, i + 1, grammar, theme, brushMap, ref ruleStack,
+                lineText, i + 1, tokenized, theme, brushMap,
                 monoFont, fontSize,
                 isChanged ? changeBg : null,
                 isChanged ? changeGutterBg : gutterBg,
                 isChanged ? changeGutterFg : gutterFg,
                 isDark);
             _diffContent.Children.Add(row);
+
+            // Yield every batch to keep loading animation alive
+            if ((i + 1) % batchSize == 0)
+                await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
         }
     }
 
@@ -271,8 +346,7 @@ public partial class DiffView : UserControl
 
     private static Border BuildHighlightedLine(
         string text, int lineNumber,
-        IGrammar? grammar, Theme? theme, Dictionary<int, IBrush>? brushMap,
-        ref IStateStack? ruleStack,
+        TokenizedLine tokenized, Theme? theme, Dictionary<int, IBrush> brushMap,
         FontFamily font, double fontSize,
         IBrush? lineBg, IBrush gutterBg, IBrush gutterFg, bool isDark)
     {
@@ -304,67 +378,31 @@ public partial class DiffView : UserControl
 
         var inlines = content.Inlines ??= new InlineCollection();
 
-        if (grammar is not null && theme is not null && brushMap is not null && !string.IsNullOrEmpty(text))
+        if (tokenized.Runs.Length > 0 && theme is not null && !string.IsNullOrEmpty(text))
         {
-            try
+            foreach (var run in tokenized.Runs)
             {
-                var result = grammar.TokenizeLine(text, ruleStack, TimeSpan.FromMilliseconds(200));
-                if (result?.Tokens is not null && result.Tokens.Length > 0)
-                {
-                    ruleStack = result.RuleStack;
-                    for (int j = 0; j < result.Tokens.Length; j++)
-                    {
-                        var token = result.Tokens[j];
-                        int start = token.StartIndex;
-                        int end = (j + 1 < result.Tokens.Length) ? result.Tokens[j + 1].StartIndex : text.Length;
-                        if (start >= text.Length) break;
-                        if (end > text.Length) end = text.Length;
-                        if (start >= end) continue;
+                if (run.Start >= run.End || run.Start >= text.Length) continue;
+                int end = Math.Min(run.End, text.Length);
+                var r = new Run(text[run.Start..end]);
 
-                        var run = new Run(text[start..end]);
-                        int fgColorId = 0;
-                        int fontStyleBits = -1;
-                        var rules = theme.Match(token.Scopes);
-                        if (rules is not null)
-                            foreach (var rule in rules)
-                            {
-                                if (rule.foreground > 0) fgColorId = rule.foreground;
-                                if ((int)rule.fontStyle >= 0) fontStyleBits = (int)rule.fontStyle;
-                            }
-
-                        if (fgColorId > 0)
-                        {
-                            var brush = GetOrCreateBrush(brushMap, theme, fgColorId);
-                            if (brush != Brushes.Transparent) run.Foreground = brush;
-                        }
-                        if (fontStyleBits > 0)
-                        {
-                            if ((fontStyleBits & (int)TextMateSharp.Themes.FontStyle.Italic) != 0)
-                                run.FontStyle = Avalonia.Media.FontStyle.Italic;
-                            if ((fontStyleBits & (int)TextMateSharp.Themes.FontStyle.Bold) != 0)
-                                run.FontWeight = FontWeight.Bold;
-                        }
-                        inlines.Add(run);
-                    }
-                }
-                else
+                if (run.FgColorId > 0)
                 {
-                    ruleStack = result?.RuleStack ?? ruleStack;
-                    if (!string.IsNullOrEmpty(text)) inlines.Add(new Run(text));
+                    var brush = GetOrCreateBrush(brushMap, theme, run.FgColorId);
+                    if (brush != Brushes.Transparent) r.Foreground = brush;
                 }
-            }
-            catch
-            {
-                if (!string.IsNullOrEmpty(text)) inlines.Add(new Run(text));
+                if (run.FontStyleBits > 0)
+                {
+                    if ((run.FontStyleBits & (int)TextMateSharp.Themes.FontStyle.Italic) != 0)
+                        r.FontStyle = Avalonia.Media.FontStyle.Italic;
+                    if ((run.FontStyleBits & (int)TextMateSharp.Themes.FontStyle.Bold) != 0)
+                        r.FontWeight = FontWeight.Bold;
+                }
+                inlines.Add(r);
             }
         }
         else
         {
-            if (grammar is not null && string.IsNullOrEmpty(text))
-            {
-                try { ruleStack = grammar.TokenizeLine("", ruleStack, TimeSpan.FromMilliseconds(50))?.RuleStack ?? ruleStack; }
-                catch { }
-            }
             if (!string.IsNullOrEmpty(text)) inlines.Add(new Run(text));
         }
 
