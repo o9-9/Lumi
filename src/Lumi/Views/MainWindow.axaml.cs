@@ -55,6 +55,7 @@ public partial class MainWindow : Window
     private ContentControl? _diffHost;
     private DiffView? _diffView;
     private TextBlock? _diffFileNameText;
+    private Border? _planIsland;
     private CancellationTokenSource? _previewAnimCts;
     private bool _suppressSelectionSync;
     private CancellationTokenSource? _browserAnimCts;
@@ -180,6 +181,7 @@ public partial class MainWindow : Window
         _diffIsland = this.FindControl<Border>("DiffIsland");
         _diffHost = this.FindControl<ContentControl>("DiffHost");
         _diffFileNameText = this.FindControl<TextBlock>("DiffFileNameText");
+        _planIsland = this.FindControl<Border>("PlanIsland");
 
         // Populate onboarding ComboBoxes
         if (_onboardingSexCombo is not null)
@@ -427,6 +429,21 @@ public partial class MainWindow : Window
             if (closeDiffBtn is not null)
                 closeDiffBtn.Click += (_, _) => { HideDiffPanel(); if (DataContext is MainViewModel m) m.ChatVM.IsDiffOpen = false; };
 
+            // Wire plan panel show/hide
+            vm.ChatVM.PlanShowRequested += () =>
+            {
+                Dispatcher.UIThread.Post(() => ShowPlanPanel());
+            };
+            vm.ChatVM.PlanHideRequested += () =>
+            {
+                Dispatcher.UIThread.Post(() => HidePlanPanel());
+            };
+
+            // Plan close button
+            var closePlanBtn = this.FindControl<Button>("ClosePlanButton");
+            if (closePlanBtn is not null)
+                closePlanBtn.Click += (_, _) => { HidePlanPanel(); if (DataContext is MainViewModel m) m.ChatVM.IsPlanOpen = false; };
+
             // Sync initial browser theme
             vm.BrowserService.SetTheme(vm.IsDarkTheme);
 
@@ -468,9 +485,10 @@ public partial class MainWindow : Window
                 }
                 else if (args.PropertyName == nameof(MainViewModel.ActiveChatId))
                 {
-                    // Hide browser/diff when switching chats — each chat starts fresh
+                    // Hide browser/diff/plan when switching chats — each chat starts fresh
                     HideBrowserPanel();
                     HideDiffPanel();
+                    HidePlanPanel();
                     Dispatcher.UIThread.Post(() => SyncListBoxSelection(vm.ActiveChatId),
                         DispatcherPriority.Loaded);
                 }
@@ -545,6 +563,7 @@ public partial class MainWindow : Window
             // Leaving chat — fully close preview panels
             HideBrowserPanel();
             HideDiffPanel();
+            HidePlanPanel();
         }
         else if (_browserIsland is { IsVisible: true })
         {
@@ -1147,6 +1166,15 @@ public partial class MainWindow : Window
             if (DataContext is MainViewModel vmd) vmd.ChatVM.IsDiffOpen = false;
         }
 
+        // Hide plan panel if open (they share column 2)
+        if (_planIsland is { IsVisible: true })
+        {
+            _planIsland.IsVisible = false;
+            _planIsland.Opacity = 1;
+            _planIsland.RenderTransform = null;
+            if (DataContext is MainViewModel vmp) vmp.ChatVM.IsPlanOpen = false;
+        }
+
         // Cancel any in-progress animation
         var ct = ReplaceCancellationTokenSource(ref _browserAnimCts).Token;
 
@@ -1273,19 +1301,22 @@ public partial class MainWindow : Window
         _browserIsland.IsVisible = false;
         _browserIsland.Opacity = 1;
         _browserIsland.RenderTransform = null;
-        if (_browserSplitter is not null)
+        if (_browserSplitter is not null && !(_diffIsland?.IsVisible ?? false) && !(_planIsland?.IsVisible ?? false))
             _browserSplitter.IsVisible = false;
 
-        // Reset to single-column layout
-        var defs = _chatContentGrid.ColumnDefinitions;
-        while (defs.Count < 3)
-            defs.Add(new ColumnDefinition());
-        defs[0].Width = new GridLength(1, GridUnitType.Star);
-        defs[1].Width = new GridLength(0);
-        defs[2].Width = new GridLength(0);
+        // Reset to single-column layout if nothing else is open
+        if (!(_diffIsland?.IsVisible ?? false) && !(_planIsland?.IsVisible ?? false))
+        {
+            var defs = _chatContentGrid.ColumnDefinitions;
+            while (defs.Count < 3)
+                defs.Add(new ColumnDefinition());
+            defs[0].Width = new GridLength(1, GridUnitType.Star);
+            defs[1].Width = new GridLength(0);
+            defs[2].Width = new GridLength(0);
 
-        if (_chatIsland is not null)
-            Grid.SetColumn(_chatIsland, 0);
+            if (_chatIsland is not null)
+                Grid.SetColumn(_chatIsland, 0);
+        }
         Grid.SetColumn(_browserIsland, 2);
     }
 
@@ -1318,6 +1349,15 @@ public partial class MainWindow : Window
                     vmb.BrowserService.Controller.IsVisible = false;
                 vmb.ChatVM.IsBrowserOpen = false;
             }
+        }
+
+        // Hide plan panel if open (they share column 2)
+        if (_planIsland is { IsVisible: true })
+        {
+            _planIsland.IsVisible = false;
+            _planIsland.Opacity = 1;
+            _planIsland.RenderTransform = null;
+            if (DataContext is MainViewModel vmp) vmp.ChatVM.IsPlanOpen = false;
         }
 
         // Cancel any in-progress animation
@@ -1406,8 +1446,8 @@ public partial class MainWindow : Window
         if (_browserSplitter is not null && !(_browserIsland?.IsVisible ?? false))
             _browserSplitter.IsVisible = false;
 
-        // Reset to single-column if browser isn't open either
-        if (!(_browserIsland?.IsVisible ?? false))
+        // Reset to single-column if nothing else is open
+        if (!(_browserIsland?.IsVisible ?? false) && !(_planIsland?.IsVisible ?? false))
         {
             var defs = _chatContentGrid.ColumnDefinitions;
             while (defs.Count < 3) defs.Add(new ColumnDefinition());
@@ -1418,5 +1458,123 @@ public partial class MainWindow : Window
         }
 
         if (DataContext is MainViewModel vm) vm.ChatVM.IsDiffOpen = false;
+    }
+
+    private bool IsPlanOpen => _planIsland is { IsVisible: true };
+
+    private async void ShowPlanPanel()
+    {
+        if (_planIsland is null || _chatContentGrid is null || _chatIsland is null) return;
+
+        // Hide browser panel if open (they share column 2)
+        if (_browserIsland is { IsVisible: true })
+        {
+            _browserIsland.IsVisible = false;
+            _browserIsland.Opacity = 1;
+            _browserIsland.RenderTransform = null;
+            if (_browserSplitter is not null) _browserSplitter.IsVisible = false;
+            if (DataContext is MainViewModel vmb)
+            {
+                if (vmb.BrowserService.Controller is not null)
+                    vmb.BrowserService.Controller.IsVisible = false;
+                vmb.ChatVM.IsBrowserOpen = false;
+            }
+        }
+
+        // Hide diff panel if open
+        if (_diffIsland is { IsVisible: true })
+        {
+            _diffIsland.IsVisible = false;
+            _diffIsland.Opacity = 1;
+            _diffIsland.RenderTransform = null;
+            if (DataContext is MainViewModel vmd) vmd.ChatVM.IsDiffOpen = false;
+        }
+
+        var ct = ReplaceCancellationTokenSource(ref _previewAnimCts).Token;
+
+        var vm = DataContext as MainViewModel;
+        if (vm is not null && vm.SelectedNavIndex != 0)
+            vm.SelectedNavIndex = 0;
+
+        // Switch to split layout
+        const double offsetX = 40.0;
+        var defs = _chatContentGrid.ColumnDefinitions;
+        while (defs.Count < 3) defs.Add(new ColumnDefinition());
+        defs[0].Width = new GridLength(1, GridUnitType.Star);
+        defs[1].Width = GridLength.Auto;
+        defs[2].Width = new GridLength(1, GridUnitType.Star);
+        Grid.SetColumn(_chatIsland, 0);
+        Grid.SetColumn(_planIsland, 2);
+
+        _planIsland.RenderTransform = new TranslateTransform(offsetX, 0);
+        _planIsland.Opacity = 0;
+        _planIsland.IsVisible = true;
+        if (_browserSplitter is not null) _browserSplitter.IsVisible = true;
+
+        var anim = new Avalonia.Animation.Animation
+        {
+            Duration = TimeSpan.FromMilliseconds(300),
+            Easing = new CubicEaseOut(),
+            FillMode = FillMode.Forward,
+            Children =
+            {
+                new KeyFrame { Cue = new Cue(0), Setters = { new Setter(OpacityProperty, 0.0), new Setter(TranslateTransform.XProperty, offsetX) } },
+                new KeyFrame { Cue = new Cue(1), Setters = { new Setter(OpacityProperty, 1.0), new Setter(TranslateTransform.XProperty, 0.0) } },
+            }
+        };
+
+        try { await anim.RunAsync(_planIsland, ct); }
+        catch (OperationCanceledException) { return; }
+        if (ct.IsCancellationRequested) return;
+
+        _planIsland.Opacity = 1;
+        _planIsland.RenderTransform = null;
+
+        if (vm is not null) vm.ChatVM.IsPlanOpen = true;
+    }
+
+    private async void HidePlanPanel()
+    {
+        if (_planIsland is null || _chatContentGrid is null) return;
+        if (!_planIsland.IsVisible) return;
+
+        var ct = ReplaceCancellationTokenSource(ref _previewAnimCts).Token;
+
+        const double offsetX = 40.0;
+        _planIsland.RenderTransform = new TranslateTransform(0, 0);
+
+        var anim = new Avalonia.Animation.Animation
+        {
+            Duration = TimeSpan.FromMilliseconds(200),
+            Easing = new CubicEaseIn(),
+            FillMode = FillMode.Forward,
+            Children =
+            {
+                new KeyFrame { Cue = new Cue(0), Setters = { new Setter(OpacityProperty, 1.0), new Setter(TranslateTransform.XProperty, 0.0) } },
+                new KeyFrame { Cue = new Cue(1), Setters = { new Setter(OpacityProperty, 0.0), new Setter(TranslateTransform.XProperty, offsetX) } },
+            }
+        };
+
+        try { await anim.RunAsync(_planIsland, ct); }
+        catch (OperationCanceledException) { }
+
+        _planIsland.IsVisible = false;
+        _planIsland.Opacity = 1;
+        _planIsland.RenderTransform = null;
+        if (_browserSplitter is not null && !(_browserIsland?.IsVisible ?? false))
+            _browserSplitter.IsVisible = false;
+
+        // Reset to single-column if nothing else is open
+        if (!(_browserIsland?.IsVisible ?? false) && !(_diffIsland?.IsVisible ?? false))
+        {
+            var defs = _chatContentGrid.ColumnDefinitions;
+            while (defs.Count < 3) defs.Add(new ColumnDefinition());
+            defs[0].Width = new GridLength(1, GridUnitType.Star);
+            defs[1].Width = new GridLength(0);
+            defs[2].Width = new GridLength(0);
+            if (_chatIsland is not null) Grid.SetColumn(_chatIsland, 0);
+        }
+
+        if (DataContext is MainViewModel vm) vm.ChatVM.IsPlanOpen = false;
     }
 }

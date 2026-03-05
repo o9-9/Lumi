@@ -38,7 +38,7 @@ public partial class ChatViewModel
     // ── Plan (server may still generate plans) ──
     [ObservableProperty] private bool _hasPlan;
     [ObservableProperty] private string? _planContent;
-    [ObservableProperty] private bool _isPlanExpanded;
+    [ObservableProperty] private bool _isPlanOpen;
 
     // ── SDK-discovered agents ──
     [ObservableProperty] private string? _selectedSdkAgentName;
@@ -717,21 +717,6 @@ public partial class ChatViewModel
             var (exists, content) = await _copilotService.ReadSessionPlanAsync(_activeSession);
             HasPlan = exists;
             PlanContent = content;
-            if (exists) IsPlanExpanded = true;
-        }
-        catch { /* best effort */ }
-    }
-
-    [RelayCommand]
-    private async Task DeletePlan()
-    {
-        if (_activeSession is null) return;
-        try
-        {
-            await _copilotService.DeleteSessionPlanAsync(_activeSession);
-            HasPlan = false;
-            PlanContent = null;
-            IsPlanExpanded = false;
         }
         catch { /* best effort */ }
     }

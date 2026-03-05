@@ -120,6 +120,10 @@ public partial class ChatViewModel : ObservableObject
     public event Action<FileChangeItem>? DiffShowRequested;
     /// <summary>Raised to hide the diff preview island.</summary>
     public event Action? DiffHideRequested;
+    /// <summary>Raised when the user clicks the plan card to open it in the right panel.</summary>
+    public event Action? PlanShowRequested;
+    /// <summary>Raised to hide the plan preview island.</summary>
+    public event Action? PlanHideRequested;
 
 
     /// <summary>Raised when the LLM calls ask_question. Args: questionId, question, options (comma-separated), allowFreeText.</summary>
@@ -950,13 +954,17 @@ public partial class ChatViewModel : ObservableObject
                             case SessionPlanChangedDataOperation.Create:
                             case SessionPlanChangedDataOperation.Update:
                                 HasPlan = true;
-                                IsPlanExpanded = true;
                                 _ = RefreshPlan();
+                                StagePlanCard(
+                                    planChanged.Data.Operation == SessionPlanChangedDataOperation.Create
+                                        ? "Created a plan"
+                                        : "Updated the plan");
+                                PlanShowRequested?.Invoke();
                                 break;
                             case SessionPlanChangedDataOperation.Delete:
                                 HasPlan = false;
                                 PlanContent = null;
-                                IsPlanExpanded = false;
+                                PlanHideRequested?.Invoke();
                                 break;
                         }
                     });
@@ -1413,8 +1421,16 @@ public partial class ChatViewModel : ObservableObject
             var (exists, content) = await _copilotService.ReadSessionPlanAsync(_activeSession);
             HasPlan = exists;
             PlanContent = content;
+            if (exists)
+                StagePlanCard("Plan");
         }
         catch { /* best effort */ }
+    }
+
+    /// <summary>Stages a plan card for insertion at end of the current turn via TranscriptBuilder.</summary>
+    private void StagePlanCard(string statusText)
+    {
+        _transcriptBuilder.SetPendingPlanCard(statusText, () => PlanShowRequested?.Invoke());
     }
 
     public void ClearChat()
@@ -1428,6 +1444,7 @@ public partial class ChatViewModel : ObservableObject
 
         BrowserHideRequested?.Invoke();
         DiffHideRequested?.Invoke();
+        PlanHideRequested?.Invoke();
         HasUsedBrowser = false;
 
         // Detach from current chat without destroying its session.
@@ -1461,7 +1478,7 @@ public partial class ChatViewModel : ObservableObject
         // Reset plan/SDK agent state
         HasPlan = false;
         PlanContent = null;
-        IsPlanExpanded = false;
+        IsPlanOpen = false;
         SelectedSdkAgentName = null;
         SdkAgentChips.Clear();
 

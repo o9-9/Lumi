@@ -603,3 +603,21 @@ public partial class FileChangesSummaryItem : TranscriptItem
         Label = fileChanges.Count == 1 ? Loc.FileChanges_One : string.Format(Loc.FileChanges_N, fileChanges.Count);
     }
 }
+
+// ── Plan card (inline indicator when agent creates/updates a plan) ──
+
+public partial class PlanCardItem : TranscriptItem
+{
+    private readonly Action? _openAction;
+
+    [ObservableProperty] private string _statusText;
+
+    public PlanCardItem(string statusText, Action? openAction)
+    {
+        _statusText = statusText;
+        _openAction = openAction;
+    }
+
+    [RelayCommand]
+    private void Open() => _openAction?.Invoke();
+}

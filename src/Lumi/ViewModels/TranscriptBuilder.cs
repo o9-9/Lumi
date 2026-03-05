@@ -36,6 +36,7 @@ public class TranscriptBuilder
 
     public HashSet<string> ShownFileChips { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<SkillReference> PendingFetchedSkillRefs { get; } = [];
+    private PlanCardItem? _pendingPlanCard;
 
     /// <summary>Sets the live collection that the builder operates on for non-rebuild operations.</summary>
     public void SetLiveTarget(ObservableCollection<TranscriptItem> target) => _liveTarget = target;
@@ -79,6 +80,7 @@ public class TranscriptBuilder
 
         CloseCurrentToolGroup();
         FlushPendingFileEdits();
+        FlushPendingPlanCard();
         CollapseAllCompletedTurns();
 
         _rebuildTarget = null;
@@ -98,6 +100,7 @@ public class TranscriptBuilder
         _todoUpdateCount = 0;
         _currentIntentText = null;
         _typingIndicator = null;
+        _pendingPlanCard = null;
         _terminalPreviewsByToolCallId.Clear();
         _toolStartTimes.Clear();
         PendingToolFileChips.Clear();
@@ -373,6 +376,7 @@ public class TranscriptBuilder
         {
             // Flush any pending file edits from the previous turn
             FlushPendingFileEdits();
+            FlushPendingPlanCard();
             var item = new UserMessageItem(msgVm, showTimestamps, (msg, edited) => _ = _resendFromMessageAction(msg, edited));
             InsertBeforeTypingIndicator(item);
         }
@@ -413,8 +417,9 @@ public class TranscriptBuilder
                         // Collapse completed turn blocks after assistant finishes
                         CollapseCompletedTurnBlocks(capturedItem);
 
-                        // Flush file changes at end of turn
+                        // Flush file changes and plan card at end of turn
                         FlushPendingFileEdits();
+                        FlushPendingPlanCard();
                     }
                 };
             }
@@ -430,6 +435,31 @@ public class TranscriptBuilder
         if (PendingFileEdits.Count == 0) return;
         InsertBeforeTypingIndicator(new FileChangesSummaryItem(GroupFileEdits()));
         PendingFileEdits.Clear();
+    }
+
+    /// <summary>
+    /// Stages a plan card for insertion at the end of the current turn.
+    /// If a plan card was already staged, updates its status text instead of creating a duplicate.
+    /// </summary>
+    public void SetPendingPlanCard(string statusText, Action openAction)
+    {
+        if (_pendingPlanCard is not null)
+        {
+            _pendingPlanCard.StatusText = statusText;
+            return;
+        }
+        _pendingPlanCard = new PlanCardItem(statusText, openAction);
+    }
+
+    /// <summary>
+    /// Inserts the staged plan card into the transcript, then clears it.
+    /// Called at the end of a turn (alongside FlushPendingFileEdits).
+    /// </summary>
+    private void FlushPendingPlanCard()
+    {
+        if (_pendingPlanCard is null) return;
+        InsertBeforeTypingIndicator(_pendingPlanCard);
+        _pendingPlanCard = null;
     }
 
     /// <summary>Groups raw pending edits by file path into one FileChangeItem per unique file.</summary>
