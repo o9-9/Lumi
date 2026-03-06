@@ -79,6 +79,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _isAuthenticated;
     [ObservableProperty] private string _gitHubLogin = "";
     [ObservableProperty] private bool _isSigningIn;
+    [ObservableProperty] private string? _gitHubAuthErrorText;
     [ObservableProperty] private string? _quotaDisplayText;
 
     // ── Privacy & Data ──
@@ -220,12 +221,33 @@ public partial class SettingsViewModel : ObservableObject
     private async Task SignInAsync()
     {
         IsSigningIn = true;
+        GitHubAuthErrorText = null;
         try
         {
-            await _copilotService.SignInAsync();
+            var signInResult = await _copilotService.SignInAsync();
+            if (signInResult != CopilotSignInResult.Success)
+            {
+                GitHubAuthErrorText = signInResult switch
+                {
+                    CopilotSignInResult.CliNotFound => Loc.Status_GitHubSignInCliMissing,
+                    _ => Loc.Status_GitHubSignInFailed,
+                };
+                return;
+            }
+
             await RefreshAuthStatusAsync();
+
+            if (!IsAuthenticated)
+                GitHubAuthErrorText = Loc.Status_GitHubSignInRefreshFailed;
         }
-        catch { /* login cancelled or failed */ }
+        catch (OperationCanceledException)
+        {
+            GitHubAuthErrorText = Loc.Status_GitHubSignInFailed;
+        }
+        catch (Exception ex)
+        {
+            GitHubAuthErrorText = string.Format(Loc.Status_GitHubSignInUnexpectedError, ex.Message);
+        }
         finally { IsSigningIn = false; }
     }
 
@@ -235,15 +257,24 @@ public partial class SettingsViewModel : ObservableObject
         {
             var status = await _copilotService.GetAuthStatusAsync();
             IsAuthenticated = status.IsAuthenticated == true;
-            GitHubLogin = status.Login ?? "";
+            GitHubLogin = status.Login ?? _copilotService.GetStoredLogin() ?? "";
+            if (IsAuthenticated)
+                GitHubAuthErrorText = null;
         }
         catch
         {
             IsAuthenticated = false;
             GitHubLogin = "";
+            QuotaDisplayText = null;
+            return;
         }
 
-        // Also refresh quota
+        if (!IsAuthenticated)
+        {
+            QuotaDisplayText = null;
+            return;
+        }
+
         await RefreshQuotaAsync();
     }
 
@@ -252,7 +283,11 @@ public partial class SettingsViewModel : ObservableObject
         try
         {
             var quota = await _copilotService.GetAccountQuotaAsync();
-            if (quota?.QuotaSnapshots is not { Count: > 0 }) return;
+            if (quota?.QuotaSnapshots is not { Count: > 0 })
+            {
+                QuotaDisplayText = null;
+                return;
+            }
 
             var snapshot = quota.QuotaSnapshots.Values.First();
             var used = snapshot.UsedRequests;
@@ -264,7 +299,10 @@ public partial class SettingsViewModel : ObservableObject
             else
                 QuotaDisplayText = $"{remaining:N0}% remaining";
         }
-        catch { /* best effort */ }
+        catch
+        {
+            QuotaDisplayText = null;
+        }
     }
 
     partial void OnEnableMemoryAutoSaveChanged(bool value) { _dataStore.Data.Settings.EnableMemoryAutoSave = value; Save(); SettingsChanged?.Invoke(); NotifyModified(); }

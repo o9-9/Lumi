@@ -21,6 +21,7 @@ public partial class MainViewModel : ObservableObject
     private readonly DataStore _dataStore;
     private readonly CopilotService _copilotService;
     private readonly BrowserService _browserService;
+    private bool _isRefreshingCopilotState;
 
     [ObservableProperty] private int _selectedNavIndex;
     [ObservableProperty] private bool _isDarkTheme = true;
@@ -95,6 +96,16 @@ public partial class MainViewModel : ObservableObject
                      or nameof(SettingsViewModel.ShowReasoning)
                      or nameof(SettingsViewModel.ExpandReasoningWhileStreaming))
                 ChatVM.RebuildTranscript();
+            else if (args.PropertyName == nameof(SettingsViewModel.IsAuthenticated))
+            {
+                if (SettingsVM.IsAuthenticated)
+                    _ = RefreshCopilotStateAsync(refreshAuthStatus: false);
+                else if (!_isRefreshingCopilotState && !IsConnecting)
+                {
+                    IsConnected = false;
+                    ConnectionStatus = Loc.Status_Disconnected;
+                }
+            }
             else if (args.PropertyName == nameof(SettingsViewModel.UserName))
                 UserName = SettingsVM.UserName;
         };
@@ -153,19 +164,31 @@ public partial class MainViewModel : ObservableObject
 
     private async Task InitializeAsync()
     {
+        await RefreshCopilotStateAsync(refreshAuthStatus: true);
+    }
+
+    private async Task RefreshCopilotStateAsync(bool refreshAuthStatus)
+    {
+        if (_isRefreshingCopilotState)
+            return;
+
         try
         {
+            _isRefreshingCopilotState = true;
             IsConnecting = true;
             ConnectionStatus = Loc.Status_Connecting;
-            await _copilotService.ConnectAsync();
-            IsConnected = true;
-            ConnectionStatus = Loc.Status_Connected;
 
-            // Check GitHub auth status
-            await SettingsVM.RefreshAuthStatusAsync();
+            if (!_copilotService.IsConnected)
+                await _copilotService.ConnectAsync();
+
+            if (refreshAuthStatus)
+                await SettingsVM.RefreshAuthStatusAsync();
 
             var models = await _copilotService.GetModelsAsync();
             var modelIds = models.Select(m => m.Id).ToList();
+
+            IsConnected = true;
+            ConnectionStatus = Loc.Status_Connected;
 
             // Auto-select best model on clean state (no user preference saved)
             var selected = ChatVM.SelectedModel;
@@ -197,6 +220,7 @@ public partial class MainViewModel : ObservableObject
         finally
         {
             IsConnecting = false;
+            _isRefreshingCopilotState = false;
         }
     }
 

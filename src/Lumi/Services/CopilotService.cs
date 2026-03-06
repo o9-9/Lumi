@@ -4,6 +4,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using GitHub.Copilot.SDK;
@@ -11,6 +14,13 @@ using Lumi.Models;
 using Microsoft.Extensions.AI;
 
 namespace Lumi.Services;
+
+public enum CopilotSignInResult
+{
+    Success,
+    CliNotFound,
+    Failed,
+}
 
 public class CopilotService : IAsyncDisposable
 {
@@ -31,14 +41,20 @@ public class CopilotService : IAsyncDisposable
     public async Task ConnectAsync(CancellationToken ct = default)
     {
         var oldClient = _client;
-
-        _client = new CopilotClient(new CopilotClientOptions
+        var cliPath = FindCliPath();
+        var clientOptions = new CopilotClientOptions
         {
+            CliPath = cliPath ?? "copilot",
             LogLevel = "error",
             AutoRestart = true,
-        });
+        };
+
+        ConfigureAuthentication(clientOptions);
+
+        _client = new CopilotClient(clientOptions);
 
         await _client.StartAsync(ct);
+        _models = null;
         Interlocked.Increment(ref _connectionGeneration);
 
         // Dispose the old client (stops the old CLI process) after the new one is ready.
@@ -109,6 +125,18 @@ public class CopilotService : IAsyncDisposable
     {
         if (_client is null) throw new InvalidOperationException("Not connected");
         return await _client.GetAuthStatusAsync(ct);
+    }
+
+    public string? GetStoredLogin()
+    {
+        try
+        {
+            return GetStoredCopilotIdentity().Login;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>Lists built-in agents available in a session via the RPC Agent API.</summary>
@@ -189,10 +217,10 @@ public class CopilotService : IAsyncDisposable
     /// <summary>
     /// Launches the Copilot CLI login flow (OAuth device flow) and waits for completion.
     /// </summary>
-    public async Task<bool> SignInAsync(CancellationToken ct = default)
+    public async Task<CopilotSignInResult> SignInAsync(CancellationToken ct = default)
     {
         var cliPath = FindCliPath();
-        if (cliPath is null) return false;
+        if (cliPath is null) return CopilotSignInResult.CliNotFound;
 
         var psi = new ProcessStartInfo
         {
@@ -202,10 +230,16 @@ public class CopilotService : IAsyncDisposable
         };
 
         using var process = Process.Start(psi);
-        if (process is null) return false;
+        if (process is null) return CopilotSignInResult.Failed;
 
         await process.WaitForExitAsync(ct);
-        return process.ExitCode == 0;
+        if (process.ExitCode != 0)
+            return CopilotSignInResult.Failed;
+
+        // The CLI login runs out-of-process, so the current SDK client keeps stale
+        // auth state until it is recreated.
+        await ConnectAsync(ct);
+        return CopilotSignInResult.Success;
     }
 
     private static string? FindCliPath()
@@ -230,6 +264,148 @@ public class CopilotService : IAsyncDisposable
         if (File.Exists(directPath)) return directPath;
 
         return null;
+    }
+
+    private static void ConfigureAuthentication(CopilotClientOptions options)
+    {
+        var token = TryReadStoredGitHubToken();
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            options.GitHubToken = token;
+            options.UseLoggedInUser = false;
+            return;
+        }
+
+        options.UseLoggedInUser = true;
+    }
+
+    private static string? TryReadStoredGitHubToken()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return null;
+
+        try
+        {
+            var identity = GetStoredCopilotIdentity();
+            if (string.IsNullOrWhiteSpace(identity.Login) || string.IsNullOrWhiteSpace(identity.Host))
+                return null;
+
+            var credentialBytes = ReadGenericCredential($"copilot-cli/{identity.Host}:{identity.Login}");
+            return ExtractTokenFromCredential(credentialBytes);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static (string? Login, string? Host) GetStoredCopilotIdentity()
+    {
+        var configPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".copilot",
+            "config.json");
+
+        if (!File.Exists(configPath))
+            return default;
+
+        using var document = JsonDocument.Parse(File.ReadAllText(configPath));
+        if (!document.RootElement.TryGetProperty("last_logged_in_user", out var lastUser)
+            || lastUser.ValueKind != JsonValueKind.Object)
+        {
+            return default;
+        }
+
+        return (
+            lastUser.TryGetProperty("login", out var login) ? login.GetString() : null,
+            lastUser.TryGetProperty("host", out var host) ? host.GetString() : null);
+    }
+
+    private static string? ExtractTokenFromCredential(byte[]? credentialBytes)
+    {
+        if (credentialBytes is not { Length: > 0 })
+            return null;
+
+        foreach (var decoded in new[]
+        {
+            Encoding.UTF8.GetString(credentialBytes).Trim('\0'),
+            Encoding.Unicode.GetString(credentialBytes).Trim('\0'),
+        })
+        {
+            if (string.IsNullOrWhiteSpace(decoded))
+                continue;
+
+            try
+            {
+                using var document = JsonDocument.Parse(decoded);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                foreach (var propertyName in new[] { "access_token", "oauth_token", "token" })
+                {
+                    if (!document.RootElement.TryGetProperty(propertyName, out var property)
+                        || property.ValueKind != JsonValueKind.String)
+                    {
+                        continue;
+                    }
+
+                    var token = property.GetString();
+                    if (!string.IsNullOrWhiteSpace(token))
+                        return token;
+                }
+            }
+            catch
+            {
+                if (decoded.All(ch => ch >= ' ' && ch <= '~'))
+                    return decoded;
+            }
+        }
+
+        return null;
+    }
+
+    private static byte[]? ReadGenericCredential(string target)
+    {
+        if (!CredRead(target, 1, 0, out var credentialPtr))
+            return null;
+
+        try
+        {
+            var credential = Marshal.PtrToStructure<CREDENTIAL>(credentialPtr);
+            if (credential.CredentialBlobSize == 0 || credential.CredentialBlob == IntPtr.Zero)
+                return [];
+
+            var bytes = new byte[credential.CredentialBlobSize];
+            Marshal.Copy(credential.CredentialBlob, bytes, 0, bytes.Length);
+            return bytes;
+        }
+        finally
+        {
+            CredFree(credentialPtr);
+        }
+    }
+
+    [DllImport("Advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CredRead(string target, uint type, int reservedFlag, out IntPtr credentialPtr);
+
+    [DllImport("Advapi32.dll", SetLastError = true)]
+    private static extern void CredFree(IntPtr cred);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct CREDENTIAL
+    {
+        public uint Flags;
+        public uint Type;
+        public string TargetName;
+        public string Comment;
+        public FILETIME LastWritten;
+        public uint CredentialBlobSize;
+        public IntPtr CredentialBlob;
+        public uint Persist;
+        public uint AttributeCount;
+        public IntPtr Attributes;
+        public string TargetAlias;
+        public string UserName;
     }
 
     public async Task<string?> GenerateTitleAsync(string userMessage, CancellationToken ct = default)
