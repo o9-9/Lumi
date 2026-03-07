@@ -269,11 +269,13 @@ public partial class AssistantMessageItem : TranscriptItem
         if (e.PropertyName == nameof(ChatMessageViewModel.Content))
         {
             Content = _source.Content;
-            UpdateVirtualizationHeightHint(TranscriptVirtualization.EstimateAssistantMessageHeight(Content, Skills.Count, FileAttachments.Count, Sources.Count));
+            // Skip expensive height estimation during streaming — content changes too fast.
+            // Height is recalculated once when streaming ends.
         }
         else if (e.PropertyName == nameof(ChatMessageViewModel.IsStreaming) && !_source.IsStreaming)
         {
             IsStreaming = false;
+            UpdateVirtualizationHeightHint(TranscriptVirtualization.EstimateAssistantMessageHeight(Content, Skills.Count, FileAttachments.Count, Sources.Count));
             _source.PropertyChanged -= OnSourcePropertyChanged;
         }
     }
@@ -370,7 +372,7 @@ public partial class ReasoningItem : TranscriptItem
         if (e.PropertyName == nameof(ChatMessageViewModel.Content) && _source is not null)
         {
             Content = _source.Content;
-            UpdateVirtualizationHeightHint(TranscriptVirtualization.EstimateReasoningHeight(Content, IsExpanded || IsActive));
+            // Skip expensive height estimation during streaming — recalculated when streaming ends.
         }
         else if (e.PropertyName == nameof(ChatMessageViewModel.IsStreaming) && _source is not null && !_source.IsStreaming)
         {

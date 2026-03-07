@@ -218,14 +218,17 @@ public partial class ChatViewModel : ObservableObject
         _sessionCache[chat.Id] = session;
 
         // Per-session streaming state — captured by closure, independent per subscription
-        var accContent = "";
-        var accReasoning = "";
+        var accContent = new System.Text.StringBuilder(4096);
+        var accReasoning = new System.Text.StringBuilder(1024);
         ChatMessage? streamingMsg = null;
         ChatMessage? reasoningMsg = null;
+        ChatMessageViewModel? streamingVm = null;
+        ChatMessageViewModel? reasoningVm = null;
         var agentName = ActiveAgent?.Name ?? Loc.Author_Lumi;
         var runtime = GetOrCreateRuntimeState(chat.Id);
         var toolParentById = new Dictionary<string, string?>(StringComparer.Ordinal);
         var terminalRootByToolCallId = new Dictionary<string, string>(StringComparer.Ordinal);
+
 
         _sessionSubs[chat.Id] = session.On(evt =>
         {
@@ -249,32 +252,33 @@ public partial class ChatViewModel : ObservableObject
                 case AssistantMessageDeltaEvent delta:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        accContent += delta.Data.DeltaContent;
+                        accContent.Append(delta.Data.DeltaContent);
                         runtime.StatusText = Loc.Status_Generating;
-                        if (streamingMsg is not null)
+                        if (streamingMsg is null)
                         {
-                            streamingMsg.Content = accContent;
+                            var currentContent = accContent.ToString();
+                            streamingMsg = new ChatMessage
+                            {
+                                Role = "assistant",
+                                Author = agentName,
+                                Content = currentContent,
+                                IsStreaming = true
+                            };
+                            _inProgressMessages[chat.Id] = streamingMsg;
                             if (_activeSession == session)
                             {
-                                var vm = Messages.LastOrDefault(m => m.Message == streamingMsg);
-                                vm?.NotifyContentChanged();
+                                streamingVm = new ChatMessageViewModel(streamingMsg);
+                                Messages.Add(streamingVm);
                                 StatusText = runtime.StatusText;
                                 ScrollToEndRequested?.Invoke();
                             }
                         }
                         else
                         {
-                            streamingMsg = new ChatMessage
-                            {
-                                Role = "assistant",
-                                Author = agentName,
-                                Content = accContent,
-                                IsStreaming = true
-                            };
-                            _inProgressMessages[chat.Id] = streamingMsg;
+                            streamingMsg.Content = accContent.ToString();
                             if (_activeSession == session)
                             {
-                                Messages.Add(new ChatMessageViewModel(streamingMsg));
+                                streamingVm?.NotifyContentChanged();
                                 StatusText = runtime.StatusText;
                                 ScrollToEndRequested?.Invoke();
                             }
@@ -290,13 +294,10 @@ public partial class ChatViewModel : ObservableObject
                             var finalContent = msg.Data.Content;
                             if (string.IsNullOrWhiteSpace(finalContent))
                             {
-                                // Empty assistant message (SDK artifact) — discard it so
-                                // preceding reasoning/tool blocks merge with the real reply.
                                 _inProgressMessages.Remove(chat.Id);
                                 if (_activeSession == session)
                                 {
-                                    var vm = Messages.LastOrDefault(m => m.Message == streamingMsg);
-                                    if (vm is not null) Messages.Remove(vm);
+                                    if (streamingVm is not null) Messages.Remove(streamingVm);
                                 }
                             }
                             else
@@ -317,45 +318,46 @@ public partial class ChatViewModel : ObservableObject
                                 _inProgressMessages.Remove(chat.Id);
                                 if (_activeSession == session)
                                 {
-                                    var vm = Messages.LastOrDefault(m => m.Message == streamingMsg);
-                                    vm?.NotifyStreamingEnded();
+                                    streamingVm?.NotifyStreamingEnded();
                                 }
                             }
                         }
                         streamingMsg = null;
-                        accContent = "";
+                        streamingVm = null;
+                        accContent.Clear();
                     });
                     break;
 
                 case AssistantReasoningDeltaEvent rd:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        accReasoning += rd.Data.DeltaContent;
+                        accReasoning.Append(rd.Data.DeltaContent);
                         runtime.StatusText = Loc.Status_Reasoning;
                         if (reasoningMsg is null)
                         {
+                            var currentReasoning = accReasoning.ToString();
                             reasoningMsg = new ChatMessage
                             {
                                 Role = "reasoning",
                                 Author = Loc.Author_Thinking,
-                                Content = accReasoning,
+                                Content = currentReasoning,
                                 IsStreaming = true
                             };
                             chat.Messages.Add(reasoningMsg);
                             if (_activeSession == session)
                             {
-                                Messages.Add(new ChatMessageViewModel(reasoningMsg));
+                                reasoningVm = new ChatMessageViewModel(reasoningMsg);
+                                Messages.Add(reasoningVm);
                                 StatusText = runtime.StatusText;
                                 ScrollToEndRequested?.Invoke();
                             }
                         }
                         else
                         {
-                            reasoningMsg.Content = accReasoning;
+                            reasoningMsg.Content = accReasoning.ToString();
                             if (_activeSession == session)
                             {
-                                var vm = Messages.LastOrDefault(m => m.Message == reasoningMsg);
-                                vm?.NotifyContentChanged();
+                                reasoningVm?.NotifyContentChanged();
                                 StatusText = runtime.StatusText;
                                 ScrollToEndRequested?.Invoke();
                             }
@@ -372,407 +374,406 @@ public partial class ChatViewModel : ObservableObject
                             reasoningMsg.IsStreaming = false;
                             if (_activeSession == session)
                             {
-                                var vm = Messages.LastOrDefault(m => m.Message == reasoningMsg);
-                                vm?.NotifyStreamingEnded();
+                                reasoningVm?.NotifyStreamingEnded();
                             }
                         }
                         reasoningMsg = null;
-                        accReasoning = "";
+                        reasoningVm = null;
+                        accReasoning.Clear();
                     });
                     break;
 
                 case ToolExecutionStartEvent toolStart:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        var startToolCallId = toolStart.Data.ToolCallId;
-                        toolParentById[startToolCallId] = toolStart.Data.ParentToolCallId;
-                        if (toolStart.Data.ToolName == "powershell")
-                        {
-                            terminalRootByToolCallId[startToolCallId] = startToolCallId;
-                        }
-                        else if (ToolDisplayHelper.IsTerminalStreamingTool(toolStart.Data.ToolName)
-                                 && !string.IsNullOrWhiteSpace(toolStart.Data.ParentToolCallId))
-                        {
-                            terminalRootByToolCallId[startToolCallId] = ToolDisplayHelper.ResolveRootTerminalToolCallId(
-                                toolStart.Data.ParentToolCallId!, toolParentById, terminalRootByToolCallId);
-                        }
+                    var startToolCallId = toolStart.Data.ToolCallId;
+                    toolParentById[startToolCallId] = toolStart.Data.ParentToolCallId;
+                    if (toolStart.Data.ToolName == "powershell")
+                    {
+                        terminalRootByToolCallId[startToolCallId] = startToolCallId;
+                    }
+                    else if (ToolDisplayHelper.IsTerminalStreamingTool(toolStart.Data.ToolName)
+                             && !string.IsNullOrWhiteSpace(toolStart.Data.ParentToolCallId))
+                    {
+                        terminalRootByToolCallId[startToolCallId] = ToolDisplayHelper.ResolveRootTerminalToolCallId(
+                            toolStart.Data.ParentToolCallId!, toolParentById, terminalRootByToolCallId);
+                    }
 
-                        var displayName = ToolDisplayHelper.FormatToolStatusName(toolStart.Data.ToolName, toolStart.Data.Arguments?.ToString());
-                        runtime.StatusText = string.Format(Loc.Status_Running, displayName);
-                        var toolMsg = new ChatMessage
-                        {
-                            Role = "tool",
-                            ToolCallId = startToolCallId,
-                            ToolName = toolStart.Data.ToolName,
-                            ToolStatus = "InProgress",
-                            Content = toolStart.Data.Arguments?.ToString() ?? "",
-                            Author = displayName
-                        };
-                        chat.Messages.Add(toolMsg);
-                        if (_activeSession == session)
-                        {
-                            Messages.Add(new ChatMessageViewModel(toolMsg));
-                            StatusText = runtime.StatusText;
-                            ScrollToEndRequested?.Invoke();
-                        }
+                    var displayName = ToolDisplayHelper.FormatToolStatusName(toolStart.Data.ToolName, toolStart.Data.Arguments?.ToString());
+                    runtime.StatusText = string.Format(Loc.Status_Running, displayName);
+                    var toolMsg = new ChatMessage
+                    {
+                        Role = "tool",
+                        ToolCallId = startToolCallId,
+                        ToolName = toolStart.Data.ToolName,
+                        ToolStatus = "InProgress",
+                        Content = toolStart.Data.Arguments?.ToString() ?? "",
+                        Author = displayName
+                    };
+                    chat.Messages.Add(toolMsg);
+                    if (_activeSession == session)
+                    {
+                        Messages.Add(new ChatMessageViewModel(toolMsg));
+                        StatusText = runtime.StatusText;
+                        ScrollToEndRequested?.Invoke();
+                    }
                     });
                     break;
 
                 case ToolExecutionPartialResultEvent partial:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (_activeSession != session)
-                            return;
+                    if (_activeSession != session)
+                        return;
 
-                        var partialToolCallId = partial.Data.ToolCallId;
-                        var partialToolName = chat.Messages.LastOrDefault(m => m.ToolCallId == partialToolCallId)?.ToolName;
-                        if (!ToolDisplayHelper.IsTerminalStreamingTool(partialToolName)
-                            && !terminalRootByToolCallId.ContainsKey(partialToolCallId))
-                            return;
+                    var partialToolCallId = partial.Data.ToolCallId;
+                    var partialToolName = chat.Messages.LastOrDefault(m => m.ToolCallId == partialToolCallId)?.ToolName;
+                    if (!ToolDisplayHelper.IsTerminalStreamingTool(partialToolName)
+                        && !terminalRootByToolCallId.ContainsKey(partialToolCallId))
+                        return;
 
-                        var rootToolCallId = ToolDisplayHelper.ResolveRootTerminalToolCallId(partialToolCallId, toolParentById, terminalRootByToolCallId);
-                        var output = ToolDisplayHelper.CleanTerminalOutput(partial.Data.PartialOutput);
-                        if (!string.IsNullOrWhiteSpace(output))
-                        {
-                            ToolDisplayHelper.ApplyTerminalOutput(chat, rootToolCallId, output, replaceExistingOutput: false);
-                            _transcriptBuilder.UpdateTerminalOutput(rootToolCallId, output, false);
-                        }
+                    var rootToolCallId = ToolDisplayHelper.ResolveRootTerminalToolCallId(partialToolCallId, toolParentById, terminalRootByToolCallId);
+                    var output = ToolDisplayHelper.CleanTerminalOutput(partial.Data.PartialOutput);
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        ToolDisplayHelper.ApplyTerminalOutput(chat, rootToolCallId, output, replaceExistingOutput: false);
+                        _transcriptBuilder.UpdateTerminalOutput(rootToolCallId, output, false);
+                    }
                     });
                     break;
 
                 case ToolExecutionProgressEvent progress:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (_activeSession != session)
-                            return;
+                    if (_activeSession != session)
+                        return;
 
-                        var progressToolCallId = progress.Data.ToolCallId;
-                        var progressToolName = chat.Messages.LastOrDefault(m => m.ToolCallId == progressToolCallId)?.ToolName;
-                        if (!ToolDisplayHelper.IsTerminalStreamingTool(progressToolName)
-                            && !terminalRootByToolCallId.ContainsKey(progressToolCallId))
-                            return;
+                    var progressToolCallId = progress.Data.ToolCallId;
+                    var progressToolName = chat.Messages.LastOrDefault(m => m.ToolCallId == progressToolCallId)?.ToolName;
+                    if (!ToolDisplayHelper.IsTerminalStreamingTool(progressToolName)
+                        && !terminalRootByToolCallId.ContainsKey(progressToolCallId))
+                        return;
 
-                        var rootToolCallId = ToolDisplayHelper.ResolveRootTerminalToolCallId(progressToolCallId, toolParentById, terminalRootByToolCallId);
-                        var output = ToolDisplayHelper.CleanTerminalOutput(progress.Data.ProgressMessage);
-                        if (!string.IsNullOrWhiteSpace(output))
-                        {
-                            ToolDisplayHelper.ApplyTerminalOutput(chat, rootToolCallId, output, replaceExistingOutput: false);
-                            _transcriptBuilder.UpdateTerminalOutput(rootToolCallId, output, false);
-                        }
+                    var rootToolCallId = ToolDisplayHelper.ResolveRootTerminalToolCallId(progressToolCallId, toolParentById, terminalRootByToolCallId);
+                    var output = ToolDisplayHelper.CleanTerminalOutput(progress.Data.ProgressMessage);
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        ToolDisplayHelper.ApplyTerminalOutput(chat, rootToolCallId, output, replaceExistingOutput: false);
+                        _transcriptBuilder.UpdateTerminalOutput(rootToolCallId, output, false);
+                    }
                     });
                     break;
 
                 case ToolExecutionCompleteEvent toolEnd:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        toolParentById[toolEnd.Data.ToolCallId] = toolEnd.Data.ParentToolCallId;
+                    toolParentById[toolEnd.Data.ToolCallId] = toolEnd.Data.ParentToolCallId;
 
-                        var success = toolEnd.Data.Success == true;
-                        var toolMsg = chat.Messages.LastOrDefault(m => m.ToolCallId == toolEnd.Data.ToolCallId);
-                        if (toolMsg is not null)
+                    var success = toolEnd.Data.Success == true;
+                    var toolMsg = chat.Messages.LastOrDefault(m => m.ToolCallId == toolEnd.Data.ToolCallId);
+                    if (toolMsg is not null)
+                    {
+                        toolMsg.ToolStatus = success ? "Completed" : "Failed";
+                        if (_activeSession == session)
                         {
-                            toolMsg.ToolStatus = success ? "Completed" : "Failed";
-                            if (_activeSession == session)
+                            var vm = Messages.LastOrDefault(m => m.Message.ToolCallId == toolEnd.Data.ToolCallId);
+                            vm?.NotifyToolStatusChanged();
+                        }
+
+                        var toolName = toolMsg.ToolName;
+
+                        if (success)
+                        {
+                            // Track fetched skills for attachment to the assistant message
+                            if (toolName == "fetch_skill")
                             {
-                                var vm = Messages.LastOrDefault(m => m.Message.ToolCallId == toolEnd.Data.ToolCallId);
-                                vm?.NotifyToolStatusChanged();
+                                string? skillName = null;
+                                try
+                                {
+                                    using var doc = JsonDocument.Parse(toolMsg.Content);
+                                    if (doc.RootElement.TryGetProperty("name", out var nameProp))
+                                        skillName = nameProp.GetString();
+                                }
+                                catch { }
+                                if (!string.IsNullOrEmpty(skillName))
+                                {
+                                    var skill = FindSkillByName(skillName);
+                                    _transcriptBuilder.PendingFetchedSkillRefs.Add(new SkillReference
+                                    {
+                                        Name = skillName,
+                                        Glyph = skill?.IconGlyph ?? "\u26A1"
+                                    });
+                                }
                             }
 
-                            var toolName = toolMsg.ToolName;
-
-                            if (success)
+                            if ((ToolDisplayHelper.IsFileCreationTool(toolName) || toolName == "powershell")
+                                && toolEnd.Data.Result?.Contents is { Length: > 0 } contents)
                             {
-                                // Track fetched skills for attachment to the assistant message
-                                if (toolName == "fetch_skill")
+                                foreach (var item in contents)
                                 {
-                                    string? skillName = null;
-                                    try
+                                    if (item is ToolExecutionCompleteDataResultContentsItemResourceLink rl
+                                        && !string.IsNullOrEmpty(rl.Uri))
                                     {
-                                        using var doc = JsonDocument.Parse(toolMsg.Content);
-                                        if (doc.RootElement.TryGetProperty("name", out var nameProp))
-                                            skillName = nameProp.GetString();
-                                    }
-                                    catch { }
-                                    if (!string.IsNullOrEmpty(skillName))
-                                    {
-                                        var skill = FindSkillByName(skillName);
-                                        _transcriptBuilder.PendingFetchedSkillRefs.Add(new SkillReference
+                                        var fp = ToolDisplayHelper.UriToLocalPath(rl.Uri);
+                                        if (fp is not null && File.Exists(fp) && ToolDisplayHelper.IsUserFacingFile(fp) && _transcriptBuilder.ShownFileChips.Add(fp))
                                         {
-                                            Name = skillName,
-                                            Glyph = skill?.IconGlyph ?? "\u26A1"
-                                        });
-                                    }
-                                }
-
-                                if ((ToolDisplayHelper.IsFileCreationTool(toolName) || toolName == "powershell")
-                                    && toolEnd.Data.Result?.Contents is { Length: > 0 } contents)
-                                {
-                                    foreach (var item in contents)
-                                    {
-                                        if (item is ToolExecutionCompleteDataResultContentsItemResourceLink rl
-                                            && !string.IsNullOrEmpty(rl.Uri))
-                                        {
-                                            var fp = ToolDisplayHelper.UriToLocalPath(rl.Uri);
-                                            if (fp is not null && File.Exists(fp) && ToolDisplayHelper.IsUserFacingFile(fp) && _transcriptBuilder.ShownFileChips.Add(fp))
-                                            {
-                                                _transcriptBuilder.PendingToolFileChips.Add(new FileAttachmentItem(fp));
-                                            }
+                                            _transcriptBuilder.PendingToolFileChips.Add(new FileAttachmentItem(fp));
                                         }
                                     }
                                 }
                             }
+                        }
 
-                            if (ToolDisplayHelper.IsTerminalStreamingTool(toolName) && _activeSession == session)
+                        if (ToolDisplayHelper.IsTerminalStreamingTool(toolName) && _activeSession == session)
+                        {
+                            var rootToolCallId = ToolDisplayHelper.ResolveRootTerminalToolCallId(
+                                toolEnd.Data.ToolCallId, toolParentById, terminalRootByToolCallId);
+                            var output = ToolDisplayHelper.ExtractTerminalOutput(toolEnd.Data.Result);
+                            if (!string.IsNullOrWhiteSpace(output))
                             {
-                                var rootToolCallId = ToolDisplayHelper.ResolveRootTerminalToolCallId(
-                                    toolEnd.Data.ToolCallId, toolParentById, terminalRootByToolCallId);
-                                var output = ToolDisplayHelper.ExtractTerminalOutput(toolEnd.Data.Result);
-                                if (!string.IsNullOrWhiteSpace(output))
-                                {
-                                    ToolDisplayHelper.ApplyTerminalOutput(chat, rootToolCallId, output, replaceExistingOutput: true);
-                                    _transcriptBuilder.UpdateTerminalOutput(rootToolCallId, output, true);
-                                    QueueSaveChat(chat, saveIndex: false);
-                                }
+                                ToolDisplayHelper.ApplyTerminalOutput(chat, rootToolCallId, output, replaceExistingOutput: true);
+                                _transcriptBuilder.UpdateTerminalOutput(rootToolCallId, output, true);
+                                QueueSaveChat(chat, saveIndex: false);
                             }
                         }
+                    }
                     });
                     break;
 
                 case AssistantTurnEndEvent:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        runtime.IsBusy = false;
-                        runtime.IsStreaming = false;
-                        runtime.StatusText = "";
-                        if (_activeSession == session)
-                        {
-                            _transcriptBuilder.HideTypingIndicator();
-                            _transcriptBuilder.CloseCurrentToolGroup();
-                            IsBusy = runtime.IsBusy;
-                            IsStreaming = runtime.IsStreaming;
-                            StatusText = runtime.StatusText;
-                        }
-                        QueueSaveChat(chat, saveIndex: true);
+                    runtime.IsBusy = false;
+                    runtime.IsStreaming = false;
+                    runtime.StatusText = "";
+                    if (_activeSession == session)
+                    {
+                        _transcriptBuilder.HideTypingIndicator();
+                        _transcriptBuilder.CloseCurrentToolGroup();
+                        IsBusy = runtime.IsBusy;
+                        IsStreaming = runtime.IsStreaming;
+                        StatusText = runtime.StatusText;
+                    }
+                    QueueSaveChat(chat, saveIndex: true);
                     });
                     break;
 
                 case SessionIdleEvent:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (_dataStore.Data.Settings.NotificationsEnabled)
-                        {
-                            var chatTitle = chat.Title;
-                            var body = string.IsNullOrWhiteSpace(chatTitle)
-                                ? Loc.Notification_ResponseReady
-                                : $"{chatTitle} — {Loc.Notification_ResponseReady}";
-                            NotificationService.ShowIfInactive(agentName, body);
-                        }
+                    if (_dataStore.Data.Settings.NotificationsEnabled)
+                    {
+                        var chatTitle = chat.Title;
+                        var body = string.IsNullOrWhiteSpace(chatTitle)
+                            ? Loc.Notification_ResponseReady
+                            : $"{chatTitle} — {Loc.Notification_ResponseReady}";
+                        NotificationService.ShowIfInactive(agentName, body);
+                    }
 
-                        // Memory checkpoint + suggestions only when session is truly idle.
-                        // Running these on every AssistantTurnEndEvent creates a storm of
-                        // background sessions that can starve the CLI process and stall
-                        // all active sessions.
-                        QueueAutonomousMemoryCheckpoint(chat);
+                    // Memory checkpoint + suggestions only when session is truly idle.
+                    // Running these on every AssistantTurnEndEvent creates a storm of
+                    // background sessions that can starve the CLI process and stall
+                    // all active sessions.
+                    QueueAutonomousMemoryCheckpoint(chat);
 
-                        // Generate follow-up suggestions once the full assistant response is done.
-                        if (_activeSession == session && CurrentChat?.Id == chat.Id)
-                            QueueSuggestionGenerationForLatestAssistant(chat);
+                    // Generate follow-up suggestions once the full assistant response is done.
+                    if (_activeSession == session && CurrentChat?.Id == chat.Id)
+                        QueueSuggestionGenerationForLatestAssistant(chat);
                     });
                     break;
 
                 case SessionTitleChangedEvent title:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (!_dataStore.Data.Settings.AutoGenerateTitles) return;
-                        chat.Title = title.Data.Title;
-                        chat.UpdatedAt = DateTimeOffset.Now;
-                        if (CurrentChat?.Id == chat.Id)
-                            OnPropertyChanged(nameof(CurrentChatTitle));
-                        if (_dataStore.Data.Settings.AutoSaveChats)
-                            _ = SaveIndexAsync();
-                        ChatTitleChanged?.Invoke(chat.Id, chat.Title);
+                    if (!_dataStore.Data.Settings.AutoGenerateTitles) return;
+                    chat.Title = title.Data.Title;
+                    chat.UpdatedAt = DateTimeOffset.Now;
+                    if (CurrentChat?.Id == chat.Id)
+                        OnPropertyChanged(nameof(CurrentChatTitle));
+                    if (_dataStore.Data.Settings.AutoSaveChats)
+                        _ = SaveIndexAsync();
+                    ChatTitleChanged?.Invoke(chat.Id, chat.Title);
                     });
                     break;
 
                 case SessionErrorEvent err:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        // Clean up any in-progress streaming message
-                        if (streamingMsg is not null)
-                        {
-                            _inProgressMessages.Remove(chat.Id);
-                            if (_activeSession == session)
-                            {
-                                var vm = Messages.LastOrDefault(m => m.Message == streamingMsg);
-                                if (vm is not null) Messages.Remove(vm);
-                            }
-                            streamingMsg = null;
-                            accContent = "";
-                        }
-                        if (reasoningMsg is not null)
-                        {
-                            reasoningMsg.IsStreaming = false;
-                            if (_activeSession == session)
-                            {
-                                var vm = Messages.LastOrDefault(m => m.Message == reasoningMsg);
-                                vm?.NotifyStreamingEnded();
-                            }
-                            reasoningMsg = null;
-                            accReasoning = "";
-                        }
-
-                        runtime.IsBusy = false;
-                        runtime.IsStreaming = false;
-                        runtime.StatusText = string.Format(Loc.Status_Error, err.Data.Message);
+                    // Clean up any in-progress streaming message
+                    if (streamingMsg is not null)
+                    {
+                        _inProgressMessages.Remove(chat.Id);
                         if (_activeSession == session)
                         {
-                            // Clean up typing indicator and tool groups
-                            _transcriptBuilder.HideTypingIndicator();
-                            _transcriptBuilder.CloseCurrentToolGroup();
-
-                            StatusText = runtime.StatusText;
-                            IsBusy = runtime.IsBusy;
-                            IsStreaming = runtime.IsStreaming;
-
-                            // Surface the error as a visible chat message
-                            var errorMsg = new ChatMessage
-                            {
-                                Role = "error",
-                                Author = Loc.Author_Lumi,
-                                Content = string.Format(Loc.Status_Error, err.Data.Message)
-                            };
-                            chat.Messages.Add(errorMsg);
-                            Messages.Add(new ChatMessageViewModel(errorMsg));
-                            _transcriptBuilder.ProcessMessageToTranscript(Messages[^1]);
-                            ScrollToEndRequested?.Invoke();
+                            if (streamingVm is not null) Messages.Remove(streamingVm);
                         }
+                        streamingMsg = null;
+                        streamingVm = null;
+                        accContent.Clear();
+                    }
+                    if (reasoningMsg is not null)
+                    {
+                        reasoningMsg.IsStreaming = false;
+                        if (_activeSession == session)
+                        {
+                            reasoningVm?.NotifyStreamingEnded();
+                        }
+                        reasoningMsg = null;
+                        reasoningVm = null;
+                        accReasoning.Clear();
+                    }
+
+                    runtime.IsBusy = false;
+                    runtime.IsStreaming = false;
+                    runtime.StatusText = string.Format(Loc.Status_Error, err.Data.Message);
+                    if (_activeSession == session)
+                    {
+                        // Clean up typing indicator and tool groups
+                        _transcriptBuilder.HideTypingIndicator();
+                        _transcriptBuilder.CloseCurrentToolGroup();
+
+                        StatusText = runtime.StatusText;
+                        IsBusy = runtime.IsBusy;
+                        IsStreaming = runtime.IsStreaming;
+
+                        // Surface the error as a visible chat message
+                        var errorMsg = new ChatMessage
+                        {
+                            Role = "error",
+                            Author = Loc.Author_Lumi,
+                            Content = string.Format(Loc.Status_Error, err.Data.Message)
+                        };
+                        chat.Messages.Add(errorMsg);
+                        Messages.Add(new ChatMessageViewModel(errorMsg));
+                        _transcriptBuilder.ProcessMessageToTranscript(Messages[^1]);
+                        ScrollToEndRequested?.Invoke();
+                    }
                     });
                     break;
 
                 case SessionCompactionStartEvent:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        runtime.StatusText = Loc.Status_Compacting;
-                        if (_activeSession == session)
-                            StatusText = runtime.StatusText;
+                    runtime.StatusText = Loc.Status_Compacting;
+                    if (_activeSession == session)
+                        StatusText = runtime.StatusText;
                     });
                     break;
 
                 case SessionCompactionCompleteEvent:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        runtime.StatusText = "";
-                        if (_activeSession == session)
-                            StatusText = runtime.StatusText;
+                    runtime.StatusText = "";
+                    if (_activeSession == session)
+                        StatusText = runtime.StatusText;
                     });
                     break;
 
                 case SessionTruncationEvent:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        runtime.StatusText = Loc.Status_Truncated;
-                        if (_activeSession == session)
-                            StatusText = runtime.StatusText;
+                    runtime.StatusText = Loc.Status_Truncated;
+                    if (_activeSession == session)
+                        StatusText = runtime.StatusText;
                     });
                     break;
 
                 case SessionWarningEvent warn:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        runtime.StatusText = string.Format(Loc.Status_Warning, warn.Data.WarningType);
-                        if (_activeSession == session)
+                    runtime.StatusText = string.Format(Loc.Status_Warning, warn.Data.WarningType);
+                    if (_activeSession == session)
+                    {
+                        StatusText = runtime.StatusText;
+                        // Surface the warning as a visible chat message
+                        var warnMsg = new ChatMessage
                         {
-                            StatusText = runtime.StatusText;
-                            // Surface the warning as a visible chat message
-                            var warnMsg = new ChatMessage
-                            {
-                                Role = "system",
-                                Author = "⚠ Warning",
-                                Content = warn.Data.Message
-                            };
-                            chat.Messages.Add(warnMsg);
-                            Messages.Add(new ChatMessageViewModel(warnMsg));
-                            _transcriptBuilder.ProcessMessageToTranscript(Messages[^1]);
-                            ScrollToEndRequested?.Invoke();
-                        }
+                            Role = "system",
+                            Author = "⚠ Warning",
+                            Content = warn.Data.Message
+                        };
+                        chat.Messages.Add(warnMsg);
+                        Messages.Add(new ChatMessageViewModel(warnMsg));
+                        _transcriptBuilder.ProcessMessageToTranscript(Messages[^1]);
+                        ScrollToEndRequested?.Invoke();
+                    }
                     });
                     break;
 
                 case AbortEvent abort:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        // SDK-initiated abort — clean up streaming state
-                        string? partialContent = null;
-                        if (streamingMsg is not null)
+                    // SDK-initiated abort — clean up streaming state
+                    string? partialContent = null;
+                    if (streamingMsg is not null)
+                    {
+                        streamingMsg.IsStreaming = false;
+                        if (!string.IsNullOrWhiteSpace(streamingMsg.Content))
                         {
-                            streamingMsg.IsStreaming = false;
-                            if (!string.IsNullOrWhiteSpace(streamingMsg.Content))
-                            {
-                                partialContent = streamingMsg.Content;
-                                chat.Messages.Add(streamingMsg);
-                                if (_activeSession == session)
-                                {
-                                    var vm = Messages.LastOrDefault(m => m.Message == streamingMsg);
-                                    vm?.NotifyStreamingEnded();
-                                }
-                            }
-                            else
-                            {
-                                _inProgressMessages.Remove(chat.Id);
-                                if (_activeSession == session)
-                                {
-                                    var vm = Messages.LastOrDefault(m => m.Message == streamingMsg);
-                                    if (vm is not null) Messages.Remove(vm);
-                                }
-                            }
-                            streamingMsg = null;
-                            accContent = "";
-                        }
-                        if (reasoningMsg is not null)
-                        {
-                            reasoningMsg.IsStreaming = false;
+                            partialContent = streamingMsg.Content;
+                            chat.Messages.Add(streamingMsg);
                             if (_activeSession == session)
                             {
-                                var vm = Messages.LastOrDefault(m => m.Message == reasoningMsg);
-                                vm?.NotifyStreamingEnded();
+                                streamingVm?.NotifyStreamingEnded();
                             }
-                            reasoningMsg = null;
-                            accReasoning = "";
                         }
-                        runtime.IsBusy = false;
-                        runtime.IsStreaming = false;
-                        runtime.StatusText = Loc.Status_Stopped;
+                        else
+                        {
+                            _inProgressMessages.Remove(chat.Id);
+                            if (_activeSession == session)
+                            {
+                                if (streamingVm is not null) Messages.Remove(streamingVm);
+                            }
+                        }
+                        streamingMsg = null;
+                        streamingVm = null;
+                        accContent.Clear();
+                    }
+                    if (reasoningMsg is not null)
+                    {
+                        reasoningMsg.IsStreaming = false;
                         if (_activeSession == session)
                         {
-                            IsBusy = false;
-                            IsStreaming = false;
-                            StatusText = runtime.StatusText;
+                            reasoningVm?.NotifyStreamingEnded();
                         }
-                        // SDK session already records the aborted turn in its event log,
-                        // so the LLM will see the partial content on the next turn automatically.
-                        QueueSaveChat(chat, saveIndex: false);
+                        reasoningMsg = null;
+                        reasoningVm = null;
+                        accReasoning.Clear();
+                    }
+                    runtime.IsBusy = false;
+                    runtime.IsStreaming = false;
+                    runtime.StatusText = Loc.Status_Stopped;
+                    if (_activeSession == session)
+                    {
+                        IsBusy = false;
+                        IsStreaming = false;
+                        StatusText = runtime.StatusText;
+                    }
+                    // SDK session already records the aborted turn in its event log,
+                    // so the LLM will see the partial content on the next turn automatically.
+                    QueueSaveChat(chat, saveIndex: false);
                     });
                     break;
 
                 case SessionShutdownEvent shutdown:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        // Session terminated server-side — invalidate cached session
-                        _sessionCache.Remove(chat.Id);
-                        chat.CopilotSessionId = null;
-                        var wasActive = _activeSession == session;
-                        if (wasActive)
-                            _activeSession = null;
+                    // Session terminated server-side — invalidate cached session
+                    _sessionCache.Remove(chat.Id);
+                    chat.CopilotSessionId = null;
+                    var wasActive = _activeSession == session;
+                    if (wasActive)
+                        _activeSession = null;
 
-                        runtime.IsBusy = false;
-                        runtime.IsStreaming = false;
-                        runtime.StatusText = "";
-                        if (wasActive)
-                        {
-                            IsBusy = false;
-                            IsStreaming = false;
-                            StatusText = "";
-                        }
+                    runtime.IsBusy = false;
+                    runtime.IsStreaming = false;
+                    runtime.StatusText = "";
+                    if (wasActive)
+                    {
+                        IsBusy = false;
+                        IsStreaming = false;
+                        StatusText = "";
+                    }
                     });
                     break;
 
@@ -781,12 +782,12 @@ public partial class ChatViewModel : ObservableObject
                 case AssistantIntentEvent intent:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (!string.IsNullOrWhiteSpace(intent.Data.Intent))
-                        {
-                            runtime.StatusText = intent.Data.Intent;
-                            if (_activeSession == session)
-                                StatusText = runtime.StatusText;
-                        }
+                    if (!string.IsNullOrWhiteSpace(intent.Data.Intent))
+                    {
+                        runtime.StatusText = intent.Data.Intent;
+                        if (_activeSession == session)
+                            StatusText = runtime.StatusText;
+                    }
                     });
                     break;
 
@@ -802,135 +803,135 @@ public partial class ChatViewModel : ObservableObject
                 case SubagentStartedEvent subStart:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        var displayName = subStart.Data.AgentDisplayName ?? subStart.Data.AgentName ?? "Agent";
-                        runtime.StatusText = $"⚡ {displayName}";
+                    var displayName = subStart.Data.AgentDisplayName ?? subStart.Data.AgentName ?? "Agent";
+                    runtime.StatusText = $"⚡ {displayName}";
 
-                        // The SDK fires ToolExecutionStartEvent before SubagentStartedEvent
-                        // with the same ToolCallId — reuse that message instead of duplicating.
-                        var existing = chat.Messages.LastOrDefault(m => m.ToolCallId == subStart.Data.ToolCallId);
-                        if (existing is not null)
+                    // The SDK fires ToolExecutionStartEvent before SubagentStartedEvent
+                    // with the same ToolCallId — reuse that message instead of duplicating.
+                    var existing = chat.Messages.LastOrDefault(m => m.ToolCallId == subStart.Data.ToolCallId);
+                    if (existing is not null)
+                    {
+                        existing.ToolName = $"agent:{subStart.Data.AgentName}";
+                        existing.Content = subStart.Data.AgentDescription ?? "";
+                        existing.Author = displayName;
+                        if (_activeSession == session)
                         {
-                            existing.ToolName = $"agent:{subStart.Data.AgentName}";
-                            existing.Content = subStart.Data.AgentDescription ?? "";
-                            existing.Author = displayName;
-                            if (_activeSession == session)
-                            {
-                                var vm = Messages.LastOrDefault(m => m.Message.ToolCallId == subStart.Data.ToolCallId);
-                                vm?.NotifyContentChanged();
-                                StatusText = runtime.StatusText;
-                            }
+                            var vm = Messages.LastOrDefault(m => m.Message.ToolCallId == subStart.Data.ToolCallId);
+                            vm?.NotifyContentChanged();
+                            StatusText = runtime.StatusText;
                         }
-                        else
+                    }
+                    else
+                    {
+                        // Fallback: no prior ToolExecutionStartEvent — create the message
+                        var toolMsg = new ChatMessage
                         {
-                            // Fallback: no prior ToolExecutionStartEvent — create the message
-                            var toolMsg = new ChatMessage
-                            {
-                                Role = "tool",
-                                ToolCallId = subStart.Data.ToolCallId,
-                                ToolName = $"agent:{subStart.Data.AgentName}",
-                                ToolStatus = "InProgress",
-                                Content = subStart.Data.AgentDescription ?? "",
-                                Author = displayName
-                            };
-                            chat.Messages.Add(toolMsg);
-                            if (_activeSession == session)
-                            {
-                                Messages.Add(new ChatMessageViewModel(toolMsg));
-                                StatusText = runtime.StatusText;
-                                ScrollToEndRequested?.Invoke();
-                            }
+                            Role = "tool",
+                            ToolCallId = subStart.Data.ToolCallId,
+                            ToolName = $"agent:{subStart.Data.AgentName}",
+                            ToolStatus = "InProgress",
+                            Content = subStart.Data.AgentDescription ?? "",
+                            Author = displayName
+                        };
+                        chat.Messages.Add(toolMsg);
+                        if (_activeSession == session)
+                        {
+                            Messages.Add(new ChatMessageViewModel(toolMsg));
+                            StatusText = runtime.StatusText;
+                            ScrollToEndRequested?.Invoke();
                         }
+                    }
                     });
                     break;
 
                 case SubagentCompletedEvent subEnd:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        // Mark ALL messages with this ToolCallId as Completed
-                        // (covers both ToolExecutionStart and SubagentStarted entries).
-                        foreach (var msg in chat.Messages.Where(m => m.ToolCallId == subEnd.Data.ToolCallId))
-                            msg.ToolStatus = "Completed";
-                        if (_activeSession == session)
-                        {
-                            foreach (var vm in Messages.Where(m => m.Message.ToolCallId == subEnd.Data.ToolCallId))
-                                vm.NotifyToolStatusChanged();
-                        }
+                    // Mark ALL messages with this ToolCallId as Completed
+                    // (covers both ToolExecutionStart and SubagentStarted entries).
+                    foreach (var msg in chat.Messages.Where(m => m.ToolCallId == subEnd.Data.ToolCallId))
+                        msg.ToolStatus = "Completed";
+                    if (_activeSession == session)
+                    {
+                        foreach (var vm in Messages.Where(m => m.Message.ToolCallId == subEnd.Data.ToolCallId))
+                            vm.NotifyToolStatusChanged();
+                    }
                     });
                     break;
 
                 case SubagentFailedEvent subFail:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        // Mark ALL messages with this ToolCallId as Failed
-                        foreach (var msg in chat.Messages.Where(m => m.ToolCallId == subFail.Data.ToolCallId))
-                        {
-                            msg.ToolStatus = "Failed";
-                            msg.ToolOutput = subFail.Data.Error;
-                        }
-                        if (_activeSession == session)
-                        {
-                            foreach (var vm in Messages.Where(m => m.Message.ToolCallId == subFail.Data.ToolCallId))
-                                vm.NotifyToolStatusChanged();
-                        }
+                    // Mark ALL messages with this ToolCallId as Failed
+                    foreach (var msg in chat.Messages.Where(m => m.ToolCallId == subFail.Data.ToolCallId))
+                    {
+                        msg.ToolStatus = "Failed";
+                        msg.ToolOutput = subFail.Data.Error;
+                    }
+                    if (_activeSession == session)
+                    {
+                        foreach (var vm in Messages.Where(m => m.Message.ToolCallId == subFail.Data.ToolCallId))
+                            vm.NotifyToolStatusChanged();
+                    }
                     });
                     break;
 
                 case AssistantUsageEvent usage:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        // Track usage data in runtime state for display/debug metrics.
-                        var d = usage.Data;
-                        runtime.TotalInputTokens += (long)(d.InputTokens ?? 0);
-                        runtime.TotalOutputTokens += (long)(d.OutputTokens ?? 0);
-                        if (_activeSession == session)
-                            OnPropertyChanged(nameof(CurrentChat));
+                    // Track usage data in runtime state for display/debug metrics.
+                    var d = usage.Data;
+                    runtime.TotalInputTokens += (long)(d.InputTokens ?? 0);
+                    runtime.TotalOutputTokens += (long)(d.OutputTokens ?? 0);
+                    if (_activeSession == session)
+                        OnPropertyChanged(nameof(CurrentChat));
                     });
                     break;
 
                 case SkillInvokedEvent skillInvoked:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (!string.IsNullOrWhiteSpace(skillInvoked.Data.Name))
+                    if (!string.IsNullOrWhiteSpace(skillInvoked.Data.Name))
+                    {
+                        var skill = FindSkillByName(skillInvoked.Data.Name);
+                        _transcriptBuilder.PendingFetchedSkillRefs.Add(new SkillReference
                         {
-                            var skill = FindSkillByName(skillInvoked.Data.Name);
-                            _transcriptBuilder.PendingFetchedSkillRefs.Add(new SkillReference
-                            {
-                                Name = skillInvoked.Data.Name,
-                                Glyph = skill?.IconGlyph ?? "\u26A1"
-                            });
-                        }
+                            Name = skillInvoked.Data.Name,
+                            Glyph = skill?.IconGlyph ?? "\u26A1"
+                        });
+                    }
                     });
                     break;
 
                 case SessionTaskCompleteEvent taskComplete:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (_activeSession == session && !string.IsNullOrWhiteSpace(taskComplete.Data.Summary))
-                        {
-                            runtime.StatusText = $"✓ {taskComplete.Data.Summary}";
-                            StatusText = runtime.StatusText;
-                        }
+                    if (_activeSession == session && !string.IsNullOrWhiteSpace(taskComplete.Data.Summary))
+                    {
+                        runtime.StatusText = $"✓ {taskComplete.Data.Summary}";
+                        StatusText = runtime.StatusText;
+                    }
                     });
                     break;
 
                 case SessionResumeEvent resume:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        runtime.StatusText = "";
-                        if (_activeSession == session)
-                            StatusText = "";
+                    runtime.StatusText = "";
+                    if (_activeSession == session)
+                        StatusText = "";
                     });
                     break;
 
                 case SessionModelChangeEvent modelChange:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (_activeSession == session && !string.IsNullOrWhiteSpace(modelChange.Data.NewModel))
-                        {
-                            if (!AvailableModels.Contains(modelChange.Data.NewModel))
-                                AvailableModels.Add(modelChange.Data.NewModel);
-                            SelectedModel = modelChange.Data.NewModel;
-                        }
+                    if (_activeSession == session && !string.IsNullOrWhiteSpace(modelChange.Data.NewModel))
+                    {
+                        if (!AvailableModels.Contains(modelChange.Data.NewModel))
+                            AvailableModels.Add(modelChange.Data.NewModel);
+                        SelectedModel = modelChange.Data.NewModel;
+                    }
                     });
                     break;
 
@@ -953,25 +954,25 @@ public partial class ChatViewModel : ObservableObject
                 case SessionPlanChangedEvent planChanged:
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (_activeSession != session) return;
-                        switch (planChanged.Data.Operation)
-                        {
-                            case SessionPlanChangedDataOperation.Create:
-                            case SessionPlanChangedDataOperation.Update:
-                                HasPlan = true;
-                                _ = RefreshPlan();
-                                StagePlanCard(
-                                    planChanged.Data.Operation == SessionPlanChangedDataOperation.Create
-                                        ? "Created a plan"
-                                        : "Updated the plan");
-                                PlanShowRequested?.Invoke();
-                                break;
-                            case SessionPlanChangedDataOperation.Delete:
-                                HasPlan = false;
-                                PlanContent = null;
-                                PlanHideRequested?.Invoke();
-                                break;
-                        }
+                    if (_activeSession != session) return;
+                    switch (planChanged.Data.Operation)
+                    {
+                        case SessionPlanChangedDataOperation.Create:
+                        case SessionPlanChangedDataOperation.Update:
+                            HasPlan = true;
+                            _ = RefreshPlan();
+                            StagePlanCard(
+                                planChanged.Data.Operation == SessionPlanChangedDataOperation.Create
+                                    ? "Created a plan"
+                                    : "Updated the plan");
+                            PlanShowRequested?.Invoke();
+                            break;
+                        case SessionPlanChangedDataOperation.Delete:
+                            HasPlan = false;
+                            PlanContent = null;
+                            PlanHideRequested?.Invoke();
+                            break;
+                    }
                     });
                     break;
             }
