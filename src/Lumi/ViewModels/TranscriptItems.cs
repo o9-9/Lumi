@@ -650,11 +650,12 @@ public partial class QuestionItem : TranscriptItem
     [ObservableProperty] private string _question;
     [ObservableProperty] private string _options;
     [ObservableProperty] private bool _allowFreeText;
+    [ObservableProperty] private bool _allowMultiSelect;
     [ObservableProperty] private string? _selectedAnswer;
     [ObservableProperty] private bool _isAnswered;
 
     public QuestionItem(string questionId, string question, string options, bool allowFreeText,
-        Action<string, string>? submitAction = null)
+        Action<string, string>? submitAction = null, bool allowMultiSelect = false)
         : base(
             $"question:{questionId}",
             typeof(QuestionItem),
@@ -664,6 +665,7 @@ public partial class QuestionItem : TranscriptItem
         _question = question;
         _options = options;
         _allowFreeText = allowFreeText;
+        _allowMultiSelect = allowMultiSelect;
         _submitAction = submitAction;
     }
 

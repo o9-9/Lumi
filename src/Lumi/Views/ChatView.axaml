@@ -507,6 +507,7 @@
       <sc:StrataQuestionCard Question="{Binding Question}"
                              Options="{Binding Options}"
                              AllowFreeText="{Binding AllowFreeText}"
+                             AllowMultiSelect="{Binding AllowMultiSelect}"
                              SelectedAnswer="{Binding SelectedAnswer, Mode=TwoWay}"
                              IsAnswered="{Binding IsAnswered, Mode=TwoWay}"
                              Margin="0,4" />

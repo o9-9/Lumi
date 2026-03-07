@@ -148,9 +148,14 @@ public class TranscriptBuilder
                 if (!string.IsNullOrEmpty(answer) && answer.StartsWith("User answered: ", StringComparison.Ordinal))
                     answer = answer["User answered: ".Length..];
 
+                var qid = msgVm.Message.QuestionId ?? ("replay_" + msgVm.Message.Id);
+                var freeText = string.Equals(ToolDisplayHelper.ExtractJsonField(msgVm.Content, "allowFreeText"), "true", StringComparison.OrdinalIgnoreCase);
+                var multiSelect = string.Equals(ToolDisplayHelper.ExtractJsonField(msgVm.Content, "allowMultiSelect"), "true", StringComparison.OrdinalIgnoreCase);
+
                 CloseCurrentToolGroup();
-                var card = new QuestionItem("replay_" + msgVm.Message.Id, question, opts, false, _submitQuestionAnswerAction);
-                if (!string.IsNullOrEmpty(answer))
+                var isAnswered = !string.IsNullOrEmpty(answer);
+                var card = new QuestionItem(qid, question, opts, freeText && !isAnswered, _submitQuestionAnswerAction, multiSelect && !isAnswered);
+                if (isAnswered)
                 {
                     card.SelectedAnswer = answer;
                     card.IsAnswered = true;
@@ -893,10 +898,10 @@ public class TranscriptBuilder
             target.Output = target.Output + "\n" + output;
     }
 
-    public void AddQuestionToTranscript(string questionId, string question, string options, bool allowFreeText)
+    public void AddQuestionToTranscript(string questionId, string question, string options, bool allowFreeText, bool allowMultiSelect = false)
     {
         CloseCurrentToolGroup();
-        var card = new QuestionItem(questionId, question, options, allowFreeText, _submitQuestionAnswerAction);
+        var card = new QuestionItem(questionId, question, options, allowFreeText, _submitQuestionAnswerAction, allowMultiSelect);
         AppendToCurrentTurn(card, TurnStableIdFor($"question:{questionId}"));
     }
 

@@ -1179,11 +1179,23 @@ public partial class ChatViewModel : ObservableObject
             var optionsStr = request.Choices is { Count: > 0 } ? string.Join(",", request.Choices) : "";
             var freeText = request.AllowFreeform ?? true;
 
+            var chatId = CurrentChat?.Id;
             Dispatcher.UIThread.Post(() =>
             {
+                if (CurrentChat?.Id != chatId) return;
                 _transcriptBuilder.AddQuestionToTranscript(questionId, request.Question, optionsStr, freeText);
                 QuestionAsked?.Invoke(questionId, request.Question, optionsStr, freeText);
                 ScrollToEndRequested?.Invoke();
+
+                // Store questionId on the tool message so it can be recovered during rebuild
+                var chat = CurrentChat;
+                if (chat is not null)
+                {
+                    var toolMsg = chat.Messages.LastOrDefault(m =>
+                        m.ToolName == "ask_question" && m.ToolStatus == "InProgress" && m.QuestionId is null);
+                    if (toolMsg is not null)
+                        toolMsg.QuestionId = questionId;
+                }
             });
 
             var answer = await tcs.Task;
