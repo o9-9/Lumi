@@ -887,7 +887,7 @@ public partial class ChatViewModel
     }
 
     /// <summary>Toggles worktree mode. Only works before a chat is created (on the welcome screen).</summary>
-    [RelayCommand]
+    [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task ToggleWorktreePreChatAsync()
     {
         // Locked once a chat exists
