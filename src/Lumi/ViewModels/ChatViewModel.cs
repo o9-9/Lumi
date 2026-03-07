@@ -218,7 +218,7 @@ public partial class ChatViewModel : ObservableObject
             _transcriptBuilder.HideTypingIndicator();
             // Refresh git status after turn completes
             if (IsCodingProject)
-                RefreshCodingProjectState();
+                _ = RefreshCodingProjectState();
         }
     }
 
@@ -1372,6 +1372,9 @@ public partial class ChatViewModel : ObservableObject
             // Rebuild transcript items from loaded messages
             RebuildTranscript();
 
+            // Await git refresh — this is the critical path for correct branch display
+            await RefreshCodingProjectState();
+
             // Restore active skills from chat
             ActiveSkillIds.Clear();
             ActiveSkillChips.Clear();
@@ -1502,6 +1505,7 @@ public partial class ChatViewModel : ObservableObject
         TranscriptTurns.Clear();
         _transcriptBuilder.ResetState();
         CurrentChat = null;
+        _ = RefreshCodingProjectState();
         IsBusy = false;
         IsStreaming = false;
         _pendingSearchSources.Clear();
@@ -1598,6 +1602,7 @@ public partial class ChatViewModel : ObservableObject
             CurrentChat = chat;
             // SDK generates titles automatically via SessionTitleChangedEvent
             await SaveCurrentChatAsync();
+            await RefreshCodingProjectState();
             ChatUpdated?.Invoke();
         }
 

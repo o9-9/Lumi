@@ -88,7 +88,7 @@ public partial class ChatViewModel
         SyncComposerProjectSelectionFromState();
         RefreshProjectBadge();
         RefreshComposerCatalogs(); // Re-scan workspace agents/skills for the new project
-        RefreshCodingProjectState();
+        _ = RefreshCodingProjectState();
     }
 
     private Guid? _pendingProjectId;
@@ -138,7 +138,7 @@ public partial class ChatViewModel
         SyncComposerProjectSelectionFromState();
         RefreshProjectBadge();
         RefreshComposerCatalogs(); // Re-scan to remove workspace agents/skills
-        RefreshCodingProjectState();
+        _ = RefreshCodingProjectState();
     }
     public void AddSkill(Skill skill)
     {

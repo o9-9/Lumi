@@ -58,6 +58,7 @@ public partial class ChatViewModel
     [ObservableProperty] private string? _worktreePath;
     /// <summary>True when a chat exists (toggle is locked).</summary>
     public bool IsWorktreeLocked => CurrentChat is not null;
+    private int _gitRefreshVersion;
     public ObservableCollection<GitFileChangeViewModel> GitChangedFiles { get; } = [];
     public bool HasGitChanges => GitChangedFileCount > 0;
     public string GitChangesLabel => GitChangedFileCount switch
@@ -123,7 +124,7 @@ public partial class ChatViewModel
         RefreshProjectBadge();
         RefreshAgentBadge();
         UpdateQualityLevels(SelectedModel);
-        RefreshCodingProjectState();
+        _ = RefreshCodingProjectState();
     }
 
     public void RefreshComposerCatalogs()
@@ -366,7 +367,6 @@ public partial class ChatViewModel
         OnPropertyChanged(nameof(IsWorktreeLocked));
         SyncComposerProjectSelectionFromState();
         RefreshProjectBadge();
-        RefreshCodingProjectState();
 
         if (value is null)
         {
@@ -832,8 +832,11 @@ public partial class ChatViewModel
     }
 
     /// <summary>Detects whether the current project is a coding project and refreshes git state.</summary>
-    public async void RefreshCodingProjectState()
+    public async Task RefreshCodingProjectState()
     {
+        // Increment version so any in-flight async refresh is discarded on completion.
+        var version = Interlocked.Increment(ref _gitRefreshVersion);
+
         // Always use the original project dir for git detection (not worktree)
         var projectDir = GetProjectWorkingDirectory();
         var isGit = GitService.IsGitRepo(projectDir);
@@ -865,8 +868,16 @@ public partial class ChatViewModel
         var branch = await GitService.GetCurrentBranchAsync(workDir);
         var changes = await GitService.GetChangedFilesAsync(workDir);
 
+        // A newer refresh was started while we were awaiting — discard these stale results.
+        if (version != Volatile.Read(ref _gitRefreshVersion))
+            return;
+
         Dispatcher.UIThread.Post(() =>
         {
+            // Double-check inside the UI dispatch in case another refresh snuck in.
+            if (version != Volatile.Read(ref _gitRefreshVersion))
+                return;
+
             GitBranch = branch;
             GitChangedFileCount = changes.Count;
             GitChangedFiles.Clear();
@@ -913,9 +924,9 @@ public partial class ChatViewModel
     }
 
     [RelayCommand]
-    private void RefreshGitStatus()
+    private async Task RefreshGitStatus()
     {
-        RefreshCodingProjectState();
+        await RefreshCodingProjectState();
     }
 
     // ── Branch flyout actions ──────────────────────────────
