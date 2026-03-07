@@ -896,10 +896,16 @@ public partial class ChatViewModel
 
         if (IsWorktreeMode)
         {
-            // Switch back to local — just clear the pending state, don't remove worktree
-            // (it was never committed to a chat)
+            // Switch back to local — remove the worktree since it was never committed to a chat
+            var oldPath = WorktreePath;
             WorktreePath = null;
             IsWorktreeMode = false;
+
+            if (oldPath is { Length: > 0 })
+            {
+                var projectDir = GetProjectWorkingDirectory();
+                await GitService.RemoveWorktreeAsync(projectDir, oldPath);
+            }
         }
         else
         {

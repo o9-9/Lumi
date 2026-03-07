@@ -1009,6 +1009,30 @@
         </StackPanel>
       </Border>
     </Panel>
+
+    <!-- ═══ Worktree Delete Confirmation Dialog ═══ -->
+    <Panel IsVisible="{Binding IsWorktreeDeleteDialogOpen}">
+      <Border Background="#40000000" />
+      <Border HorizontalAlignment="Center" VerticalAlignment="Center"
+              Classes="strata-dialog" Padding="24,20" MinWidth="320" MaxWidth="420">
+        <StackPanel Spacing="14">
+          <TextBlock Text="{loc:Str Dialog_DeleteWorktreeTitle}" FontSize="{DynamicResource Font.SizeBody}" FontWeight="SemiBold" />
+          <TextBlock Text="{loc:Str Dialog_DeleteWorktreeMessage}" TextWrapping="Wrap"
+                     Foreground="{DynamicResource Brush.TextSecondary}" FontSize="{DynamicResource Font.SizeCaption}" />
+          <StackPanel Spacing="8">
+            <Button Classes="accent motion-action" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Content="{loc:Str Dialog_DeleteWithWorktree}" Padding="14,8" MinHeight="0"
+                    Command="{Binding ConfirmDeleteWithWorktreeCommand}" />
+            <Button Classes="subtle motion-action" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Content="{loc:Str Dialog_DeleteKeepWorktree}" Padding="14,8" MinHeight="0"
+                    Command="{Binding ConfirmDeleteWithoutWorktreeCommand}" />
+            <Button Classes="subtle motion-action" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Content="{loc:Str Common_Cancel}" Padding="14,8" MinHeight="0"
+                    Command="{Binding CancelDeleteWorktreeDialogCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Panel>
   </Panel>
   </Border>
 </Window>

@@ -435,6 +435,11 @@
   "Git_CopyBranch": "העתק שם ענף",
   "Git_CopyPath": "העתק נתיב תיקייה",
 
+  "Dialog_DeleteWorktreeTitle": "מחיקת שיחה עם worktree",
+  "Dialog_DeleteWorktreeMessage": "לשיחה זו יש worktree משויך. האם ברצונך למחוק גם את ה-worktree והענף שלו?",
+  "Dialog_DeleteWithWorktree": "מחק שיחה ו-worktree",
+  "Dialog_DeleteKeepWorktree": "מחק שיחה, שמור worktree",
+
   "Sidebar_McpServers": "שרתי MCP",
   "Sidebar_NewMcpServerTooltip": "שרת MCP חדש",
   "Editor_McpServer": "עורך שרת MCP",

@@ -163,12 +163,23 @@ public static class GitService
         return null;
     }
 
-    /// <summary>Removes a git worktree.</summary>
+    /// <summary>Removes a git worktree and its associated branch.</summary>
     public static async Task<bool> RemoveWorktreeAsync(string dir, string worktreePath)
     {
         if (!Directory.Exists(worktreePath)) return true;
+
+        // Get the branch name before removing the worktree
+        var branch = await RunGitAsync(worktreePath, "rev-parse --abbrev-ref HEAD");
+        branch = branch?.Trim();
+
         var result = await RunGitAsync(dir, $"worktree remove \"{worktreePath}\" --force");
-        return result is not null;
+        if (result is null) return false;
+
+        // Delete the orphaned branch if it was a lumi/ branch
+        if (branch is { Length: > 0 } && branch.StartsWith("lumi/"))
+            await RunGitAsync(dir, $"branch -D \"{branch}\"");
+
+        return true;
     }
 
     /// <summary>Lists existing worktrees.</summary>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -354,6 +355,63 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void DeleteChat(Chat chat)
     {
+        // If the chat has a worktree, ask the user whether to clean it up
+        if (chat.WorktreePath is { Length: > 0 } wt && Directory.Exists(wt))
+        {
+            _pendingDeleteChat = chat;
+            IsWorktreeDeleteDialogOpen = true;
+            return;
+        }
+
+        PerformDeleteChat(chat, removeWorktree: false);
+    }
+
+    // ── Worktree cleanup dialog ──
+
+    private Chat? _pendingDeleteChat;
+    [ObservableProperty] private bool _isWorktreeDeleteDialogOpen;
+
+    [RelayCommand]
+    private async Task ConfirmDeleteWithWorktree()
+    {
+        if (_pendingDeleteChat is not null)
+        {
+            var chat = _pendingDeleteChat;
+            _pendingDeleteChat = null;
+            IsWorktreeDeleteDialogOpen = false;
+            PerformDeleteChat(chat, removeWorktree: true);
+
+            // Clean up worktree + branch in background
+            if (chat.WorktreePath is { Length: > 0 } wt)
+            {
+                var projectDir = GetProjectDirForChat(chat);
+                if (projectDir is not null)
+                    await GitService.RemoveWorktreeAsync(projectDir, wt);
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void ConfirmDeleteWithoutWorktree()
+    {
+        if (_pendingDeleteChat is not null)
+        {
+            var chat = _pendingDeleteChat;
+            _pendingDeleteChat = null;
+            IsWorktreeDeleteDialogOpen = false;
+            PerformDeleteChat(chat, removeWorktree: false);
+        }
+    }
+
+    [RelayCommand]
+    private void CancelDeleteWorktreeDialog()
+    {
+        _pendingDeleteChat = null;
+        IsWorktreeDeleteDialogOpen = false;
+    }
+
+    private void PerformDeleteChat(Chat chat, bool removeWorktree)
+    {
         ChatVM.CleanupSession(chat.Id);
         _dataStore.Data.Chats.Remove(chat);
         _dataStore.DeleteChatFile(chat.Id);
@@ -362,6 +420,17 @@ public partial class MainViewModel : ObservableObject
 
         if (ChatVM.CurrentChat?.Id == chat.Id)
             ChatVM.ClearChat();
+    }
+
+    private string? GetProjectDirForChat(Chat chat)
+    {
+        if (chat.ProjectId.HasValue)
+        {
+            var project = _dataStore.Data.Projects.FirstOrDefault(p => p.Id == chat.ProjectId.Value);
+            if (project?.WorkingDirectory is { Length: > 0 } dir)
+                return dir;
+        }
+        return null;
     }
 
     [ObservableProperty] private Chat? _renamingChat;

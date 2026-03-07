@@ -434,6 +434,11 @@
   "Git_CopyBranch": "Copy branch name",
   "Git_CopyPath": "Copy directory path",
 
+  "Dialog_DeleteWorktreeTitle": "Delete chat with worktree",
+  "Dialog_DeleteWorktreeMessage": "This chat has an associated git worktree. Would you like to also remove the worktree and its branch?",
+  "Dialog_DeleteWithWorktree": "Delete chat and worktree",
+  "Dialog_DeleteKeepWorktree": "Delete chat, keep worktree",
+
   "Sidebar_McpServers": "MCP Servers",
   "Sidebar_NewMcpServerTooltip": "New MCP server",
   "Editor_McpServer": "MCP Server Editor",
