@@ -4,6 +4,14 @@
 
 Lumi is a cross-platform Avalonia desktop app — a personal agentic assistant that can do anything. It is a chat application with a modern, intuitive UX that feels alive. Lumi's main interface is a chat interface powered by GitHub Copilot SDK as the agentic backend. Single-project solution with MVVM architecture using CommunityToolkit.Mvvm source generators.
 
+## Tech Stack
+
+- **.NET 10** with C# and nullable reference types
+- **Avalonia UI 11.3** — cross-platform desktop framework
+- **CommunityToolkit.Mvvm 8.4** — MVVM source generators (`[ObservableProperty]`, `[RelayCommand]`)
+- **GitHub.Copilot.SDK** — agentic backend for LLM interaction
+- **StrataTheme** — custom UI component library (external project reference at `../../../Strata/src/StrataTheme/`)
+
 ## Core Concepts
 
 - **Chat** — A chat session with Lumi. Primary interaction surface. Has message history and can be linked to a project and/or agent.
@@ -32,6 +40,18 @@ Lumi is a cross-platform Avalonia desktop app — a personal agentic assistant t
 
 ## Architecture
 
+```
+App.axaml.cs
+  ├── DataStore          (JSON persistence → %AppData%/Lumi/data.json)
+  ├── CopilotService     (GitHub Copilot SDK wrapper)
+  └── MainViewModel
+        ├── ChatViewModel      → DataStore, CopilotService, SystemPromptBuilder
+        ├── SkillsViewModel    → DataStore
+        ├── AgentsViewModel    → DataStore
+        ├── ProjectsViewModel  → DataStore
+        └── SettingsViewModel  → DataStore
+```
+
 - **Models** (`src/Lumi/Models/Models.cs`): All domain entities in one file — `Chat`, `ChatMessage`, `Project`, `Skill`, `LumiAgent`, `Memory`, `UserSettings`, `AppData`
 - **Services** (`src/Lumi/Services/`): `CopilotService` (SDK wrapper with streaming events), `DataStore` (JSON persistence to `%AppData%/Lumi/data.json`), `SystemPromptBuilder` (composite system prompt)
 - **ViewModels** (`src/Lumi/ViewModels/`): `MainViewModel` (root), `ChatViewModel` (streaming chat), `AgentsViewModel`, `ProjectsViewModel`, `SkillsViewModel`, `SettingsViewModel` — all CRUD follows same pattern
@@ -39,6 +59,60 @@ Lumi is a cross-platform Avalonia desktop app — a personal agentic assistant t
 - **External dependency**: StrataTheme UI library referenced via `StrataPath` in `Lumi.csproj` — provides `StrataChatShell`, `StrataChatMessage`, `StrataMarkdown`, `StrataThink`, `StrataAiToolCall`, etc.
 
 > **WARNING**: There are TWO copies of StrataTheme. The csproj first checks `../../../Strata/src/StrataTheme/` (a sibling repo — **primary**, used by build) then falls back to `../../Strata/src/StrataTheme/` (git submodule at `Strata/` — **stale fallback**). **Always edit Strata files in the primary external repo**, not in the `Strata/` submodule inside this repo. Edits to the wrong copy silently have no effect.
+
+### Key Patterns
+
+- **MVVM** with CommunityToolkit.Mvvm source generators — use `[ObservableProperty]` for bindable properties and `[RelayCommand]` for commands
+- **Event-driven streaming** — `CopilotService` events → `Dispatcher.UIThread.Post` → ViewModel state → View reactivity
+- **Programmatic UI construction** — `ChatView.axaml.cs` builds the chat transcript dynamically using Strata controls (not data templates)
+- **JSON file persistence** — single `data.json` file via `DataStore`, no database
+- **System prompt composition** — `SystemPromptBuilder` assembles context from user name, time of day, agent, project, skills, and memories
+
+### Strata UI Controls Used
+
+- `StrataChatShell`, `StrataChatComposer`, `StrataChatMessage` — chat layout
+- `StrataMarkdown` — markdown rendering
+- `StrataThink`, `StrataAiToolCall` — tool call display
+- `StrataTypingIndicator` — streaming indicator
+- `StrataAttachmentList`, `StrataFileAttachment` — file attachments
+
+## Project Structure
+
+```
+src/Lumi/
+  ├── Models/Models.cs         — All domain entities (Chat, Project, Skill, LumiAgent, Memory, etc.)
+  ├── Services/
+  │   ├── CopilotService.cs    — GitHub Copilot SDK integration
+  │   ├── DataStore.cs         — JSON persistence
+  │   └── SystemPromptBuilder.cs — Dynamic system prompt assembly
+  ├── ViewModels/              — MVVM ViewModels
+  │   ├── MainViewModel.cs     — Root VM, navigation, chat list management
+  │   ├── ChatViewModel.cs     — Active chat state, message streaming
+  │   ├── AgentsViewModel.cs   — Agent CRUD
+  │   ├── ProjectsViewModel.cs — Project CRUD
+  │   ├── SkillsViewModel.cs   — Skill CRUD
+  │   └── SettingsViewModel.cs — User settings
+  └── Views/                   — Avalonia XAML views + code-behind
+      ├── MainWindow.axaml(.cs) — App shell, sidebar, navigation
+      ├── ChatView.axaml(.cs)   — Chat transcript (heavy code-behind)
+      ├── AgentsView.axaml(.cs) — Agent management
+      ├── ProjectsView.axaml(.cs) — Project management
+      ├── SkillsView.axaml(.cs)  — Skill management
+      └── SettingsView.axaml(.cs) — Settings page
+```
+
+## Domain Model
+
+| Entity | Purpose |
+|--------|---------|
+| `ChatMessage` | Single message with role (user/assistant/system/tool/reasoning) |
+| `Chat` | Conversation with message history, linked to project/agent |
+| `Project` | Collection of chats with custom instructions |
+| `Skill` | Reusable capability definition (markdown content) |
+| `LumiAgent` | Custom agent persona with system prompt, skills, tools |
+| `Memory` | Persistent user fact extracted from conversations |
+| `UserSettings` | App preferences (name, theme, model) |
+| `AppData` | Root container for all persisted data |
 
 ## Code Style
 
