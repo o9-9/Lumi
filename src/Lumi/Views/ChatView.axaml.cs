@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -18,19 +22,33 @@ namespace Lumi.Views;
 
 public partial class ChatView : UserControl
 {
+    private const double ScrollMutationDeltaThreshold = 0.05d;
+    private const double LayoutShiftDeltaTolerance = 0.2d;
+
     private StrataChatShell? _chatShell;
     private StrataChatComposer? _composer;
     private Panel? _composerSpacer;
     private Panel? _dropOverlay;
+    private ItemsControl? _transcript;
+    private ScrollViewer? _transcriptScrollViewer;
 
     private ChatViewModel? _subscribedVm;
+    private ObservableCollection<TranscriptTurn>? _subscribedMountedTurns;
     private Border? _worktreeHighlight;
     private Button? _localToggleBtn;
     private Button? _worktreeToggleBtn;
+    private bool _isApplyingTranscriptMutation;
+    private bool _resizeRestoreQueued;
+    private bool _viewportEvaluationQueued;
+    private bool _viewportEvaluationRequested;
+    private ScrollAnchorState? _pendingResizeAnchor;
+    private readonly Dictionary<string, double> _observedTurnHeights = new(StringComparer.Ordinal);
 
     private static readonly string ClipboardImagesDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Lumi", "clipboard-images");
+
+    private sealed record ScrollAnchorState(string StableId, double ViewportY);
 
     public ChatView()
     {
@@ -45,6 +63,7 @@ public partial class ChatView : UserControl
         _composer = this.FindControl<StrataChatComposer>("Composer");
         _composerSpacer = this.FindControl<Panel>("ComposerSpacer");
         _dropOverlay = this.FindControl<Panel>("DropOverlay");
+        _transcript = this.FindControl<ItemsControl>("Transcript");
 
         // Slide-up animation for coding strip
         var codingStrip = this.FindControl<Border>("CodingStrip");
@@ -80,6 +99,7 @@ public partial class ChatView : UserControl
         AddHandler(DragDrop.DropEvent, OnDrop);
         AddHandler(StrataFileAttachment.OpenRequestedEvent, OnFileAttachmentOpenRequested);
         AddHandler(StrataChatMessage.CopyTurnRequestedEvent, OnCopyTurnRequested);
+        SizeChanged += OnChatViewSizeChanged;
     }
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -98,11 +118,21 @@ public partial class ChatView : UserControl
             vm.ClipboardPasteRequested += OnClipboardPasteRequested;
             vm.CopyToClipboardRequested += OnCopyToClipboardRequested;
             vm.FocusComposerRequested += FocusComposer;
+            SubscribeToMountedTurns(vm.MountedTranscriptTurns);
+            Dispatcher.UIThread.Post(EnsureTranscriptScrollViewer, DispatcherPriority.Loaded);
         }
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        Dispatcher.UIThread.Post(EnsureTranscriptScrollViewer, DispatcherPriority.Loaded);
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        DetachTranscriptScrollViewer();
+        UnsubscribeMountedTurns();
         UnsubscribeFromViewModel();
         _subscribedVm?.StopVoiceIfRecording();
         base.OnDetachedFromVisualTree(e);
@@ -127,7 +157,111 @@ public partial class ChatView : UserControl
         _subscribedVm = null;
     }
 
+    private void SubscribeToMountedTurns(ObservableCollection<TranscriptTurn> mountedTurns)
+    {
+        UnsubscribeMountedTurns();
+        _subscribedMountedTurns = mountedTurns;
+        _subscribedMountedTurns.CollectionChanged += OnMountedTurnsChanged;
+        foreach (var turn in _subscribedMountedTurns)
+            SubscribeToTurn(turn);
+    }
+
+    private void UnsubscribeMountedTurns()
+    {
+        if (_subscribedMountedTurns is null)
+            return;
+
+        _subscribedMountedTurns.CollectionChanged -= OnMountedTurnsChanged;
+        foreach (var turn in _subscribedMountedTurns)
+            turn.PropertyChanged -= OnMountedTurnPropertyChanged;
+
+        _observedTurnHeights.Clear();
+        _subscribedMountedTurns = null;
+    }
+
+    private void EnsureTranscriptScrollViewer()
+    {
+        if (_transcriptScrollViewer is not null || _chatShell is null)
+            return;
+
+        _transcriptScrollViewer = _chatShell.TranscriptScrollViewer;
+        if (_transcriptScrollViewer is null)
+        {
+            Dispatcher.UIThread.Post(EnsureTranscriptScrollViewer, DispatcherPriority.Loaded);
+            return;
+        }
+
+        _transcriptScrollViewer.ScrollChanged += OnTranscriptScrollChanged;
+        _transcriptScrollViewer.SizeChanged += OnTranscriptViewportSizeChanged;
+    }
+
+    private void DetachTranscriptScrollViewer()
+    {
+        if (_transcriptScrollViewer is null)
+            return;
+
+        _transcriptScrollViewer.ScrollChanged -= OnTranscriptScrollChanged;
+        _transcriptScrollViewer.SizeChanged -= OnTranscriptViewportSizeChanged;
+        _transcriptScrollViewer = null;
+    }
+
+    private void OnMountedTurnsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (TranscriptTurn turn in e.OldItems)
+            {
+                turn.PropertyChanged -= OnMountedTurnPropertyChanged;
+                _observedTurnHeights.Remove(turn.StableId);
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (TranscriptTurn turn in e.NewItems)
+                SubscribeToTurn(turn);
+        }
+    }
+
+    private void SubscribeToTurn(TranscriptTurn turn)
+    {
+        _observedTurnHeights[turn.StableId] = turn.MeasuredHeight;
+        turn.PropertyChanged += OnMountedTurnPropertyChanged;
+    }
+
     // ── Scroll management ────────────────────────────────
+
+    private void OnMountedTurnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(TranscriptTurn.MeasuredHeight)
+            || sender is not TranscriptTurn turn
+            || _chatShell is null
+            || _transcriptScrollViewer is null
+            || _isApplyingTranscriptMutation)
+            return;
+
+        _observedTurnHeights.TryGetValue(turn.StableId, out var previousHeight);
+        _observedTurnHeights[turn.StableId] = turn.MeasuredHeight;
+
+        var delta = turn.MeasuredHeight - previousHeight;
+        if (Math.Abs(delta) < 0.5)
+            return;
+
+        var control = FindRealizedTurnControl(turn.StableId);
+        var point = control?.TranslatePoint(default, _transcriptScrollViewer);
+        if (control is null || point is null)
+            return;
+
+        if (_chatShell.IsPinnedToBottom)
+            return;
+
+        if (point.Value.Y + control.Bounds.Height > 0)
+            return;
+
+        var beforeOffset = _chatShell.VerticalOffset;
+        _chatShell.ScrollToVerticalOffset(beforeOffset + delta);
+        _subscribedVm?.RecordTranscriptScrollCompensation("height-change", beforeOffset, _chatShell.VerticalOffset);
+    }
 
     private void OnScrollToEndRequested() => _chatShell?.ScrollToEnd();
 
@@ -138,14 +272,26 @@ public partial class ChatView : UserControl
         Dispatcher.UIThread.Post(FocusComposer, DispatcherPriority.Input);
     }
 
-    private void OnTranscriptRebuilt()
+    private async void OnTranscriptRebuilt()
     {
-        _chatShell?.ResetAutoScroll();
-        Dispatcher.UIThread.Post(() =>
-        {
-            _chatShell?.ScrollToEnd();
-            FocusComposer();
-        }, DispatcherPriority.Loaded);
+        if (_subscribedVm is null || _chatShell is null)
+            return;
+
+        var ready = await EnsureTranscriptScrollViewerReadyAsync();
+        if (!ready || _subscribedVm is null || _chatShell is null)
+            return;
+
+        var chatShell = _chatShell;
+        var viewModel = _subscribedVm;
+
+        chatShell.ResetAutoScroll();
+        viewModel.InitializeMountedTranscript(chatShell.ViewportHeight);
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+        viewModel.EnsureMountedTranscriptCoverage(chatShell.ViewportHeight);
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+        chatShell.ScrollToEnd();
+        viewModel.UpdateTranscriptPinnedState(chatShell.IsPinnedToBottom, chatShell.CurrentDistanceFromBottom);
+        FocusComposer();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -155,6 +301,216 @@ public partial class ChatView : UserControl
 
         if (e.PropertyName == nameof(ChatViewModel.IsWorktreeMode))
             UpdateWorktreeToggleHighlight();
+    }
+
+    private void OnTranscriptScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (_isApplyingTranscriptMutation || _subscribedVm is null || _chatShell is null || _transcriptScrollViewer is null)
+            return;
+
+        _subscribedVm.UpdateTranscriptPinnedState(_chatShell.IsPinnedToBottom, _chatShell.CurrentDistanceFromBottom);
+
+        if (Math.Abs(e.OffsetDelta.Y) < ScrollMutationDeltaThreshold)
+            return;
+
+        if (IsLikelyLayoutDrivenOffsetChange(e))
+            return;
+
+        QueueTranscriptViewportEvaluation();
+    }
+
+    private void QueueTranscriptViewportEvaluation()
+    {
+        _viewportEvaluationRequested = true;
+        if (_viewportEvaluationQueued)
+            return;
+
+        _viewportEvaluationQueued = true;
+        Dispatcher.UIThread.Post(() => _ = EvaluateTranscriptViewportAsync(), DispatcherPriority.Loaded);
+    }
+
+    private async Task EvaluateTranscriptViewportAsync()
+    {
+        try
+        {
+            for (var round = 0; round < 8; round++)
+            {
+                _viewportEvaluationRequested = false;
+
+                if (_isApplyingTranscriptMutation || _subscribedVm is null || _chatShell is null || _transcriptScrollViewer is null)
+                    return;
+
+                var anchor = CaptureAnchor();
+                var mutation = _subscribedVm.UpdateTranscriptViewport(
+                    _chatShell.VerticalOffset,
+                    _chatShell.ViewportHeight,
+                    _chatShell.ExtentHeight);
+
+                if (!mutation.HasChanges)
+                {
+                    if (!_viewportEvaluationRequested)
+                        return;
+
+                    await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+                    continue;
+                }
+
+                await CompleteTranscriptMutationAsync(anchor, mutation);
+
+                if (mutation.Kind != TranscriptWindowMutationKind.Prepend && !_viewportEvaluationRequested)
+                    return;
+
+                await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+            }
+        }
+        finally
+        {
+            _viewportEvaluationQueued = false;
+            if (_viewportEvaluationRequested)
+                QueueTranscriptViewportEvaluation();
+        }
+    }
+
+    private async void OnTranscriptViewportSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (_isApplyingTranscriptMutation || _subscribedVm is null || _chatShell is null)
+            return;
+
+        var anchor = _chatShell.IsPinnedToBottom ? null : CaptureAnchor();
+        var mutation = _subscribedVm.EnsureMountedTranscriptCoverage(_chatShell.ViewportHeight);
+        if (mutation.HasChanges)
+            await CompleteTranscriptMutationAsync(anchor, mutation);
+
+        if (_chatShell.IsPinnedToBottom)
+            Dispatcher.UIThread.Post(() => _chatShell?.ScrollToEnd(), DispatcherPriority.Loaded);
+    }
+
+    private void OnChatViewSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (_chatShell is null || _isApplyingTranscriptMutation)
+            return;
+
+        if (Math.Abs(e.PreviousSize.Width - e.NewSize.Width) < 0.5)
+            return;
+
+        if (_chatShell.IsPinnedToBottom)
+        {
+            Dispatcher.UIThread.Post(() => _chatShell?.ScrollToEnd(), DispatcherPriority.Loaded);
+            return;
+        }
+
+        _pendingResizeAnchor ??= CaptureAnchor();
+        if (_resizeRestoreQueued)
+            return;
+
+        _resizeRestoreQueued = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _resizeRestoreQueued = false;
+            var anchor = _pendingResizeAnchor;
+            _pendingResizeAnchor = null;
+            RestoreAnchor(anchor, "resize");
+        }, DispatcherPriority.Loaded);
+    }
+
+    private async Task<bool> EnsureTranscriptScrollViewerReadyAsync()
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            EnsureTranscriptScrollViewer();
+            if (_transcriptScrollViewer is not null && _chatShell is not null)
+                return true;
+
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+        }
+
+        return false;
+    }
+
+    private async Task CompleteTranscriptMutationAsync(ScrollAnchorState? anchor, TranscriptWindowMutation mutation)
+    {
+        _isApplyingTranscriptMutation = true;
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+            if (mutation.RequiresAnchorRestore)
+                RestoreAnchor(anchor, mutation.Kind == TranscriptWindowMutationKind.Prepend ? "prepend" : "cleanup");
+
+            if (_chatShell is not null && _subscribedVm is not null)
+                _subscribedVm.UpdateTranscriptPinnedState(_chatShell.IsPinnedToBottom, _chatShell.CurrentDistanceFromBottom);
+        }
+        finally
+        {
+            _isApplyingTranscriptMutation = false;
+        }
+    }
+
+    private ScrollAnchorState? CaptureAnchor()
+    {
+        if (_transcriptScrollViewer is null)
+            return null;
+
+        foreach (var control in EnumerateRealizedTurnControls())
+        {
+            var point = control.TranslatePoint(default, _transcriptScrollViewer);
+            if (point is null)
+                continue;
+
+            if (point.Value.Y + control.Bounds.Height < 0)
+                continue;
+
+            if (control.Turn is null)
+                continue;
+
+            return new ScrollAnchorState(control.Turn.StableId, point.Value.Y);
+        }
+
+        return null;
+    }
+
+    private void RestoreAnchor(ScrollAnchorState? anchor, string reason)
+    {
+        if (anchor is null || _chatShell is null || _transcriptScrollViewer is null)
+            return;
+
+        var control = FindRealizedTurnControl(anchor.StableId);
+        var point = control?.TranslatePoint(default, _transcriptScrollViewer);
+        if (control is null || point is null)
+            return;
+
+        var delta = point.Value.Y - anchor.ViewportY;
+        if (Math.Abs(delta) < 0.5)
+            return;
+
+        var beforeOffset = _chatShell.VerticalOffset;
+        _chatShell.ScrollToVerticalOffset(beforeOffset + delta);
+        _subscribedVm?.RecordTranscriptScrollCompensation(reason, beforeOffset, _chatShell.VerticalOffset);
+    }
+
+    private TranscriptTurnControl? FindRealizedTurnControl(string stableId)
+    {
+        return EnumerateRealizedTurnControls().FirstOrDefault(control => control.Turn?.StableId == stableId);
+    }
+
+    private IEnumerable<TranscriptTurnControl> EnumerateRealizedTurnControls()
+    {
+        var itemsHost = _transcript?.ItemsPanelRoot;
+        return itemsHost is null
+            ? Enumerable.Empty<TranscriptTurnControl>()
+            : itemsHost.GetVisualDescendants().OfType<TranscriptTurnControl>();
+    }
+
+    private static bool IsLikelyLayoutDrivenOffsetChange(ScrollChangedEventArgs e)
+    {
+        var extentDeltaY = Math.Abs(e.ExtentDelta.Y);
+        if (extentDeltaY < ScrollMutationDeltaThreshold)
+            return false;
+
+        var viewportDeltaY = Math.Abs(e.ViewportDelta.Y);
+        if (viewportDeltaY > ScrollMutationDeltaThreshold)
+            return false;
+
+        return Math.Abs(Math.Abs(e.OffsetDelta.Y) - extentDeltaY) <= LayoutShiftDeltaTolerance;
     }
 
     // ── File picker (requires View-level StorageProvider) ──
@@ -250,7 +606,7 @@ public partial class ChatView : UserControl
         if (turn is null) return;
 
         var sb = new System.Text.StringBuilder();
-        foreach (var item in turn.Items)
+        foreach (var item in turn.Items ?? Enumerable.Empty<TranscriptItem>())
         {
             if (item is AssistantMessageItem assistantMsg)
             {

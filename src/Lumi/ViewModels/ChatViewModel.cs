@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -22,6 +24,9 @@ namespace Lumi.ViewModels;
 
 public partial class ChatViewModel : ObservableObject
 {
+    private static readonly bool TranscriptDiagnosticsEnabled = Debugger.IsAttached
+        || string.Equals(Environment.GetEnvironmentVariable("LUMI_TRANSCRIPT_DEBUG"), "1", StringComparison.Ordinal);
+
     private readonly DataStore _dataStore;
     private readonly CopilotService _copilotService;
     private readonly MemoryAgentService _memoryAgentService;
@@ -35,6 +40,10 @@ public partial class ChatViewModel : ObservableObject
     private readonly List<SearchSource> _pendingSearchSources = [];
 
     private readonly TranscriptBuilder _transcriptBuilder;
+    private readonly TranscriptWindowController _transcriptWindow = new(new TranscriptPagingOptions
+    {
+        EnableDiagnostics = TranscriptDiagnosticsEnabled,
+    });
 
     /// <summary>The CopilotSession for the currently displayed chat. Events for this session update the UI.</summary>
     private CopilotSession? _activeSession;
@@ -139,8 +148,12 @@ public partial class ChatViewModel : ObservableObject
     };
 
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = [];
-    /// <summary>Turn list for the chat transcript. Bound to the transcript ItemsControl.</summary>
-    [ObservableProperty] private ObservableCollection<TranscriptTurnControl> _transcriptTurns = [];
+    /// <summary>Full transcript turn store retained in memory for the active chat.</summary>
+    [ObservableProperty] private ObservableCollection<TranscriptTurn> _transcriptTurns = [];
+    public ObservableCollection<TranscriptTurn> MountedTranscriptTurns => _transcriptWindow.MountedTurns;
+    public string TranscriptDiagnosticsText => ShowTranscriptDiagnostics ? _transcriptWindow.DiagnosticsText : string.Empty;
+    public bool IsTranscriptPinnedToBottom => _transcriptWindow.IsPinnedToBottom;
+    public bool ShowTranscriptDiagnostics { get; } = TranscriptDiagnosticsEnabled;
 
     public ObservableCollection<string> AvailableModels { get; } = [];
     public ObservableCollection<string> PendingAttachments { get; } = [];
@@ -201,6 +214,8 @@ public partial class ChatViewModel : ObservableObject
             submitQuestionAnswerAction: SubmitQuestionAnswer,
             resendFromMessageAction: ResendFromMessageAsync);
         _transcriptBuilder.SetLiveTarget(_transcriptTurns);
+        _transcriptWindow.BindTranscript(_transcriptTurns, "ctor");
+        _transcriptWindow.PropertyChanged += OnTranscriptWindowPropertyChanged;
 
         // Seed with preferred modelso the ComboBox has an initial selection
         if (!string.IsNullOrWhiteSpace(_selectedModel))
@@ -233,6 +248,15 @@ public partial class ChatViewModel : ObservableObject
         InitializeMvvmUiState();
     }
 
+    private void OnTranscriptWindowPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (ShowTranscriptDiagnostics && e.PropertyName == nameof(TranscriptWindowController.DiagnosticsText))
+            OnPropertyChanged(nameof(TranscriptDiagnosticsText));
+
+        if (e.PropertyName == nameof(TranscriptWindowController.IsPinnedToBottom))
+            OnPropertyChanged(nameof(IsTranscriptPinnedToBottom));
+    }
+
     partial void OnIsBusyChanged(bool value)
     {
         if (value)
@@ -255,8 +279,55 @@ public partial class ChatViewModel : ObservableObject
     internal void RebuildTranscript()
     {
         TranscriptTurns = _transcriptBuilder.Rebuild(Messages);
+        _transcriptWindow.BindTranscript(TranscriptTurns, "rebuild");
+        _transcriptWindow.ResetToLatest(TranscriptWindowController.DefaultInitialViewportHeight, "rebuild");
         TranscriptRebuilt?.Invoke();
     }
+
+    internal TranscriptWindowMutation InitializeMountedTranscript(double viewportHeight)
+    {
+        var mutation = _transcriptWindow.ResetToLatest(viewportHeight, "initial-open");
+        if (ShowTranscriptDiagnostics)
+            OnPropertyChanged(nameof(TranscriptDiagnosticsText));
+        return mutation;
+    }
+
+    internal TranscriptWindowMutation EnsureMountedTranscriptCoverage(double viewportHeight)
+    {
+        var mutation = _transcriptWindow.EnsureViewportCoverage(viewportHeight, "viewport-fill");
+        if (ShowTranscriptDiagnostics)
+            OnPropertyChanged(nameof(TranscriptDiagnosticsText));
+        return mutation;
+    }
+
+    internal TranscriptWindowMutation UpdateTranscriptViewport(double offsetY, double viewportHeight, double extentHeight)
+    {
+        var mutation = _transcriptWindow.UpdateViewport(
+            new TranscriptViewportState(
+                offsetY,
+                viewportHeight,
+                extentHeight,
+                _transcriptWindow.IsPinnedToBottom,
+                _transcriptWindow.DistanceFromBottom),
+            "scroll");
+        if (ShowTranscriptDiagnostics)
+            OnPropertyChanged(nameof(TranscriptDiagnosticsText));
+        return mutation;
+    }
+
+    internal void UpdateTranscriptPinnedState(bool isPinnedToBottom, double distanceFromBottom)
+    {
+        _transcriptWindow.UpdatePinnedState(isPinnedToBottom, distanceFromBottom, "scroll-state");
+    }
+
+    internal void RecordTranscriptScrollCompensation(string reason, double beforeOffset, double afterOffset)
+    {
+        _transcriptWindow.RecordScrollCompensation(reason, beforeOffset, afterOffset);
+        if (ShowTranscriptDiagnostics)
+            OnPropertyChanged(nameof(TranscriptDiagnosticsText));
+    }
+
+    internal TranscriptWindowDiagnosticsSnapshot CaptureTranscriptDiagnostics() => _transcriptWindow.CaptureSnapshot();
 
     /// <summary>Subscribes to events on a CopilotSession. Each subscription captures its own
     /// streaming state via closures and always updates the Chat model. UI updates are gated

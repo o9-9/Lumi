@@ -656,7 +656,12 @@
 
         <sc:StrataChatShell.Transcript>
           <ItemsControl x:Name="Transcript"
-                        ItemsSource="{Binding TranscriptTurns}">
+                        ItemsSource="{Binding MountedTranscriptTurns}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:TranscriptTurn">
+                <vm:TranscriptTurnControl Turn="{Binding}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
                 <StackPanel Spacing="8" />
@@ -671,6 +676,24 @@
         </sc:StrataChatShell.Composer>
 
       </sc:StrataChatShell>
+
+  <Border IsVisible="{Binding ShowTranscriptDiagnostics}"
+      HorizontalAlignment="Right"
+      VerticalAlignment="Top"
+      Margin="0,72,12,0"
+      MaxWidth="360"
+      Padding="10,8"
+      CornerRadius="12"
+      Background="#CC101521"
+      BorderBrush="#404E6B"
+      BorderThickness="1"
+      ZIndex="6">
+    <TextBlock Classes="caption"
+       Foreground="#FFDDE7F7"
+       FontFamily="Consolas, Cascadia Code, monospace"
+       TextWrapping="Wrap"
+       Text="{Binding TranscriptDiagnosticsText}" />
+  </Border>
     </Panel>
 
     <!-- Single composer — always visible, animates between welcome and active states -->

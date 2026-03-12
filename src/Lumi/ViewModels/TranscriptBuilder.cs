@@ -27,22 +27,22 @@ public class TranscriptBuilder
     private int _todoUpdateCount;
     private string? _currentIntentText;
     private TypingIndicatorItem? _typingIndicator;
-    private TranscriptTurnControl? _typingTurn;
-    private TranscriptTurnControl? _currentTurn;
+    private TranscriptTurn? _typingTurn;
+    private TranscriptTurn? _currentTurn;
     private readonly Dictionary<string, TerminalPreviewItem> _terminalPreviewsByToolCallId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _toolStartTimes = [];
     public List<FileAttachmentItem> PendingToolFileChips { get; } = [];
     public List<(string FilePath, string ToolName, string? OldText, string? NewText)> PendingFileEdits { get; } = [];
-    private IList<TranscriptTurnControl>? _rebuildTarget;
+    private IList<TranscriptTurn>? _rebuildTarget;
     public bool IsRebuildingTranscript { get; set; }
 
     public HashSet<string> ShownFileChips { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<SkillReference> PendingFetchedSkillRefs { get; } = [];
     private PlanCardItem? _pendingPlanCard;
 
-    public void SetLiveTarget(ObservableCollection<TranscriptTurnControl> target) => _liveTarget = target;
+    public void SetLiveTarget(ObservableCollection<TranscriptTurn> target) => _liveTarget = target;
 
-    private ObservableCollection<TranscriptTurnControl>? _liveTarget;
+    private ObservableCollection<TranscriptTurn>? _liveTarget;
 
     private sealed class TodoProgressState
     {
@@ -64,10 +64,10 @@ public class TranscriptBuilder
         _resendFromMessageAction = resendFromMessageAction;
     }
 
-    public ObservableCollection<TranscriptTurnControl> Rebuild(IEnumerable<ChatMessageViewModel> messages)
+    public ObservableCollection<TranscriptTurn> Rebuild(IEnumerable<ChatMessageViewModel> messages)
     {
         IsRebuildingTranscript = true;
-        var tempTurns = new List<TranscriptTurnControl>();
+        var tempTurns = new List<TranscriptTurn>();
         _rebuildTarget = tempTurns;
         ResetState();
 
@@ -81,7 +81,7 @@ public class TranscriptBuilder
         FinalizeCurrentTurn();
 
         _rebuildTarget = null;
-        var result = new ObservableCollection<TranscriptTurnControl>(tempTurns.Where(static turn => turn.Items.Count > 0));
+        var result = new ObservableCollection<TranscriptTurn>(tempTurns.Where(static turn => turn.Items.Count > 0));
         _liveTarget = result;
         IsRebuildingTranscript = false;
         return result;
@@ -714,7 +714,7 @@ public class TranscriptBuilder
         }
     }
 
-    private void CollapseCompletedTurnBlocks(TranscriptTurnControl turn, AssistantMessageItem assistantItem)
+    private void CollapseCompletedTurnBlocks(TranscriptTurn turn, AssistantMessageItem assistantItem)
     {
         var items = turn.Items;
         var idx = items.IndexOf(assistantItem);
@@ -843,7 +843,7 @@ public class TranscriptBuilder
         if (_typingIndicator is null)
         {
             _typingIndicator = new TypingIndicatorItem(label ?? Loc.Status_Thinking);
-            _typingTurn = new TranscriptTurnControl("turn:typing");
+            _typingTurn = new TranscriptTurn("turn:typing");
             _typingTurn.Items.Add(_typingIndicator);
             _liveTarget.Add(_typingTurn);
             return;
@@ -909,12 +909,12 @@ public class TranscriptBuilder
         EnsureCurrentTurn(turnStableId).Items.Add(item);
     }
 
-    private TranscriptTurnControl EnsureCurrentTurn(string turnStableId)
+    private TranscriptTurn EnsureCurrentTurn(string turnStableId)
     {
         if (_currentTurn is not null)
             return _currentTurn;
 
-        _currentTurn = new TranscriptTurnControl(turnStableId);
+        _currentTurn = new TranscriptTurn(turnStableId);
         InsertTurnBeforeTypingIndicator(_currentTurn);
         return _currentTurn;
     }
@@ -925,7 +925,7 @@ public class TranscriptBuilder
         _currentTurn = null;
     }
 
-    private void InsertTurnBeforeTypingIndicator(TranscriptTurnControl turn)
+    private void InsertTurnBeforeTypingIndicator(TranscriptTurn turn)
     {
         if (_rebuildTarget is not null)
         {
@@ -949,15 +949,15 @@ public class TranscriptBuilder
         _liveTarget.Add(turn);
     }
 
-    private TranscriptTurnControl? FindTurnContaining(TranscriptItem item)
+    private TranscriptTurn? FindTurnContaining(TranscriptItem item)
     {
         var turns = GetTurnTarget();
         return turns?.FirstOrDefault(turn => turn.Items.Contains(item));
     }
 
-    private IList<TranscriptTurnControl>? GetTurnTarget() => _rebuildTarget ?? _liveTarget;
+    private IList<TranscriptTurn>? GetTurnTarget() => _rebuildTarget ?? _liveTarget;
 
-    private void RemoveTurnIfEmpty(TranscriptTurnControl? turn)
+    private void RemoveTurnIfEmpty(TranscriptTurn? turn)
     {
         if (turn is null || turn.Items.Count > 0)
             return;
