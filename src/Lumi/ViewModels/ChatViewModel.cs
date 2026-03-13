@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -78,6 +79,7 @@ public partial class ChatViewModel : ObservableObject
         public long TotalInputTokens { get; set; }
         public long TotalOutputTokens { get; set; }
         public bool HasUsedBrowser { get; set; }
+        public string? PendingTitlePrompt { get; set; }
     }
 
     /// <summary>Gets or lazily creates a per-chat BrowserService instance.</summary>
@@ -828,28 +830,34 @@ public partial class ChatViewModel : ObservableObject
                 case SessionIdleEvent:
                     Dispatcher.UIThread.Post(() =>
                     {
-                    if (_dataStore.Data.Settings.NotificationsEnabled)
-                    {
-                        var chatTitle = chat.Title;
-                        var body = string.IsNullOrWhiteSpace(chatTitle)
-                            ? Loc.Notification_ResponseReady
-                            : $"{chatTitle} — {Loc.Notification_ResponseReady}";
-                        NotificationService.ShowIfInactive(agentName, body);
-                    }
+                        var pendingTitlePrompt = runtime.PendingTitlePrompt;
+                        runtime.PendingTitlePrompt = null;
 
-                    // Flush file changes only when session is truly idle (not between agentic turns).
-                    if (_activeSession == session)
-                        _transcriptBuilder.FlushPendingFileEdits();
+                        if (_dataStore.Data.Settings.NotificationsEnabled)
+                        {
+                            var chatTitle = chat.Title;
+                            var body = string.IsNullOrWhiteSpace(chatTitle)
+                                ? Loc.Notification_ResponseReady
+                                : $"{chatTitle} — {Loc.Notification_ResponseReady}";
+                            NotificationService.ShowIfInactive(agentName, body);
+                        }
 
-                    // Memory checkpoint + suggestions only when session is truly idle.
-                    // Running these on every AssistantTurnEndEvent creates a storm of
-                    // background sessions that can starve the CLI process and stall
-                    // all active sessions.
-                    QueueAutonomousMemoryCheckpoint(chat);
+                        // Flush file changes only when session is truly idle (not between agentic turns).
+                        if (_activeSession == session)
+                            _transcriptBuilder.FlushPendingFileEdits();
 
-                    // Generate follow-up suggestions once the full assistant response is done.
-                    if (_activeSession == session && CurrentChat?.Id == chat.Id)
-                        QueueSuggestionGenerationForLatestAssistant(chat);
+                        // Memory checkpoint + suggestions only when session is truly idle.
+                        // Running these on every AssistantTurnEndEvent creates a storm of
+                        // background sessions that can starve the CLI process and stall
+                        // all active sessions.
+                        QueueAutonomousMemoryCheckpoint(chat);
+
+                        if (!string.IsNullOrWhiteSpace(pendingTitlePrompt))
+                            _ = GenerateTitleForChatAsync(chat, pendingTitlePrompt);
+
+                        // Generate follow-up suggestions once the full assistant response is done.
+                        if (_activeSession == session && CurrentChat?.Id == chat.Id)
+                            QueueSuggestionGenerationForLatestAssistant(chat);
                     });
                     break;
 
@@ -1372,6 +1380,57 @@ public partial class ChatViewModel : ObservableObject
         return runtime;
     }
 
+    private List<Skill> ResolveSkillsByIds(IReadOnlyCollection<Guid> skillIds)
+    {
+        if (skillIds.Count == 0)
+            return [];
+
+        var skillsById = _dataStore.Data.Skills.ToDictionary(s => s.Id);
+        var resolvedSkills = new List<Skill>(skillIds.Count);
+        foreach (var skillId in skillIds)
+        {
+            if (skillsById.TryGetValue(skillId, out var skill))
+                resolvedSkills.Add(skill);
+        }
+
+        return resolvedSkills;
+    }
+
+    private List<SkillReference> BuildSkillReferences(IReadOnlyCollection<Guid> skillIds)
+    {
+        return ResolveSkillsByIds(skillIds)
+            .Select(static s => new SkillReference { Name = s.Name, Glyph = s.IconGlyph })
+            .ToList();
+    }
+
+    private static async Task<string?> LoadWorkspaceAgentContentAsync(string workDir, string? workspaceAgentName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceAgentName))
+            return null;
+
+        var agentFile = Path.Combine(workDir, ".github", "agents", workspaceAgentName + ".md");
+        if (!File.Exists(agentFile))
+            return null;
+
+        try
+        {
+            return await File.ReadAllTextAsync(agentFile, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<string?> SyncActiveSkillDirectoryAsync(CancellationToken ct)
+    {
+        if (ActiveSkillIds.Count == 0)
+            return null;
+
+        var activeSkillIds = ActiveSkillIds.ToList();
+        return await _dataStore.SyncSkillFilesForIdsAsync(activeSkillIds, ct);
+    }
+
     private (long RequestId, CancellationTokenSource Source) BeginChatLoad(CancellationToken outerCancellationToken)
     {
         CancellationTokenSource? previous;
@@ -1402,44 +1461,35 @@ public partial class ChatViewModel : ObservableObject
     private async Task<bool> EnsureSessionAsync(Chat chat, CancellationToken ct, bool allowCreateFallback = true)
     {
         var allSkills = _dataStore.Data.Skills;
-        var activeSkills = ActiveSkillIds.Count > 0
-            ? allSkills.Where(s => ActiveSkillIds.Contains(s.Id)).ToList()
-            : new List<Skill>();
+        var activeSkills = ResolveSkillsByIds(ActiveSkillIds);
         var memories = _dataStore.Data.Memories;
         var project = chat.ProjectId.HasValue
             ? _dataStore.Data.Projects.FirstOrDefault(p => p.Id == chat.ProjectId)
             : null;
         var systemPrompt = SystemPromptBuilder.Build(
             _dataStore.Data.Settings, ActiveAgent, project, allSkills, activeSkills, memories);
+        var workDir = GetEffectiveWorkingDirectory();
 
         // If a workspace agent (from .github/agents/) is selected, load its content and append to system prompt
         var workspaceAgentName = chat.SdkAgentName ?? SelectedSdkAgentName;
-        if (!string.IsNullOrWhiteSpace(workspaceAgentName) && ActiveAgent is null)
-        {
-            var agentDir = GetEffectiveWorkingDirectory();
-            var agentFile = Path.Combine(agentDir, ".github", "agents", workspaceAgentName + ".md");
-            if (File.Exists(agentFile))
-            {
-                try
-                {
-                    var agentContent = await File.ReadAllTextAsync(agentFile, ct);
-                    systemPrompt = (systemPrompt ?? "") + "\n\n--- Active Agent: " + workspaceAgentName + " ---\n" + agentContent;
-                }
-                catch { /* best effort */ }
-            }
-        }
-
-        var skillDirs = new List<string>();
-        if (ActiveSkillIds.Count > 0)
-        {
-            var dir = await _dataStore.SyncSkillFilesForIdsAsync(ActiveSkillIds);
-            skillDirs.Add(dir);
-        }
+        var workspaceAgentContentTask = ActiveAgent is null
+            ? LoadWorkspaceAgentContentAsync(workDir, workspaceAgentName, ct)
+            : Task.FromResult<string?>(null);
+        var skillDirTask = SyncActiveSkillDirectoryAsync(ct);
+        var mcpServersTask = BuildMcpServersAsync(workDir, ct);
 
         var customAgents = BuildCustomAgents();
         var customTools = BuildCustomTools(chat.Id);
-        var workDir = GetEffectiveWorkingDirectory();
-        var mcpServers = BuildMcpServers(workDir);
+        var agentContent = await workspaceAgentContentTask;
+        if (!string.IsNullOrWhiteSpace(agentContent))
+            systemPrompt = (systemPrompt ?? "") + "\n\n--- Active Agent: " + workspaceAgentName + " ---\n" + agentContent;
+
+        var skillDirs = new List<string>();
+        var dir = await skillDirTask;
+        if (!string.IsNullOrWhiteSpace(dir))
+            skillDirs.Add(dir);
+
+        var mcpServers = await mcpServersTask;
         var reasoningEffort = _dataStore.Data.Settings.ReasoningEffort;
         var effort = string.IsNullOrWhiteSpace(reasoningEffort) ? null : reasoningEffort;
 
@@ -1930,9 +1980,8 @@ public partial class ChatViewModel : ObservableObject
             _dataStore.Data.Chats.Add(chat);
             CurrentChat = chat;
             if (_dataStore.Data.Settings.AutoGenerateTitles)
-                _ = GenerateTitleForChatAsync(chat, prompt);
-            await SaveCurrentChatAsync();
-            await RefreshCodingProjectState();
+                GetOrCreateRuntimeState(chat.Id).PendingTitlePrompt = prompt;
+            _ = RefreshCodingProjectState();
             ChatUpdated?.Invoke();
         }
 
@@ -1943,15 +1992,11 @@ public partial class ChatViewModel : ObservableObject
             Content = prompt,
             Author = _dataStore.Data.Settings.UserName ?? Loc.Author_You,
             Attachments = attachments?.Select(a => a.Path).ToList() ?? [],
-            ActiveSkills = ActiveSkillIds
-                .Select(id => _dataStore.Data.Skills.FirstOrDefault(s => s.Id == id))
-                .Where(s => s is not null)
-                .Select(s => new SkillReference { Name = s!.Name, Glyph = s.IconGlyph })
-                .ToList()
+            ActiveSkills = BuildSkillReferences(ActiveSkillIds)
         };
         CurrentChat.Messages.Add(userMsg);
         Messages.Add(new ChatMessageViewModel(userMsg));
-        await SaveCurrentChatAsync();
+        QueueSaveChat(CurrentChat, saveIndex: true);
         UserMessageSent?.Invoke();
 
         CancellationTokenSource? cts = null;
@@ -2013,19 +2058,21 @@ public partial class ChatViewModel : ObservableObject
             // Inject newly activated skills as context in the message (explicit activation in existing chat)
             if (_pendingSkillInjections.Count > 0)
             {
-                var allSkills = _dataStore.Data.Skills;
-                var injectedSkills = _pendingSkillInjections
-                    .Select(id => allSkills.FirstOrDefault(s => s.Id == id))
-                    .Where(s => s is not null)
-                    .ToList();
+                var injectedSkills = ResolveSkillsByIds(_pendingSkillInjections);
                 _pendingSkillInjections.Clear();
 
                 if (injectedSkills.Count > 0)
                 {
-                    var skillContext = "\n\n--- Activated Skills (apply these to help with the request) ---\n";
+                    var skillContext = new StringBuilder("\n\n--- Activated Skills (apply these to help with the request) ---\n");
                     foreach (var skill in injectedSkills)
-                        skillContext += $"\n### {skill!.Name}\n{skill.Content}\n";
-                    sendOptions.Prompt += skillContext;
+                    {
+                        skillContext.Append("\n### ")
+                            .Append(skill.Name)
+                            .Append('\n')
+                            .Append(skill.Content)
+                            .Append('\n');
+                    }
+                    sendOptions.Prompt += skillContext.ToString();
                 }
             }
 
@@ -2501,7 +2548,7 @@ public partial class ChatViewModel : ObservableObject
         };
         CurrentChat.Messages.Add(newUserMsg);
         Messages.Add(new ChatMessageViewModel(newUserMsg));
-        await SaveCurrentChatAsync();
+        QueueSaveChat(CurrentChat, saveIndex: true);
         ScrollToEndRequested?.Invoke();
 
         // Resend

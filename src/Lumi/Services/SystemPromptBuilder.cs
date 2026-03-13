@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using Lumi.Localization;
 using Lumi.Models;
 
@@ -287,15 +288,19 @@ public static class SystemPromptBuilder
             - If auto-save is disabled, explicitly tell the user that automatic memory saving is off and suggest enabling it in Settings or editing memories from the Memories page.
             - Use `recall_memory` only when a memory key is relevant and you need its full content.
             """;
+        var promptBuilder = new StringBuilder(prompt);
+        var activeSkillIds = activeSkills.Count > 0
+            ? activeSkills.Select(static s => s.Id).ToHashSet()
+            : null;
 
         if (agent is not null)
         {
-            prompt += $"""
+            promptBuilder.Append($"""
 
 
                 --- Active Agent: {agent.Name} ---
                 {agent.SystemPrompt}
-                """;
+                """);
 
             // Include agent's linked skills
             if (agent.SkillIds.Count > 0)
@@ -303,25 +308,23 @@ public static class SystemPromptBuilder
                 var agentSkills = allSkills.Where(s => agent.SkillIds.Contains(s.Id)).ToList();
                 if (agentSkills.Count > 0)
                 {
-                    prompt += "\n\n--- Agent Skills ---\n";
+                    promptBuilder.Append("\n\n--- Agent Skills ---\n");
                     foreach (var skill in agentSkills)
-                    {
-                        prompt += $"\n### {skill.Name}\n{skill.Content}\n";
-                    }
+                        promptBuilder.Append("\n### ").Append(skill.Name).Append('\n').Append(skill.Content).Append('\n');
                 }
             }
         }
 
         if (project is not null)
         {
-            prompt += string.IsNullOrWhiteSpace(project.Instructions)
+            promptBuilder.Append(string.IsNullOrWhiteSpace(project.Instructions)
                 ? $"\n\n--- Active Project: {project.Name} ---\n"
                 : $"""
 
 
                     --- Active Project: {project.Name} ---
                     {project.Instructions}
-                    """;
+                    """);
         }
 
         // Note: copilot-instructions.md / AGENTS.md injection is handled by the Copilot SDK
@@ -330,17 +333,15 @@ public static class SystemPromptBuilder
         // Active skills selected by the user for this chat (full content in system prompt)
         if (activeSkills.Count > 0)
         {
-            prompt += "\n\n--- Active Skills (use these to help the user) ---\n";
+            promptBuilder.Append("\n\n--- Active Skills (use these to help the user) ---\n");
             foreach (var skill in activeSkills)
-            {
-                prompt += $"\n### {skill.Name}\n{skill.Content}\n";
-            }
+                promptBuilder.Append("\n### ").Append(skill.Name).Append('\n').Append(skill.Content).Append('\n');
         }
 
         // All available skills (short descriptions for implicit discovery)
         if (allSkills.Count > 0)
         {
-            prompt += """
+            promptBuilder.Append("""
 
 
                 --- Available Skills ---
@@ -353,27 +354,34 @@ public static class SystemPromptBuilder
                 - If the user's request is somewhat related to a skill → ask the user if they'd like you to use that skill before fetching it.
                 - Skills marked with ✓ are already active — their full content is loaded above, no need to fetch them again.
 
-                """;
+                """);
             foreach (var skill in allSkills)
             {
-                var activeMarker = activeSkills.Any(s => s.Id == skill.Id) ? " ✓" : "";
-                prompt += $"- **{skill.Name}**: {skill.Description}{activeMarker}\n";
+                var activeMarker = activeSkillIds?.Contains(skill.Id) == true ? " ✓" : "";
+                promptBuilder.Append("- **")
+                    .Append(skill.Name)
+                    .Append("**: ")
+                    .Append(skill.Description)
+                    .Append(activeMarker)
+                    .Append('\n');
             }
         }
 
         if (memories.Count > 0)
         {
-            prompt += $"\n\n--- Your Memories About {userName} ---\n";
+            promptBuilder.Append("\n\n--- Your Memories About ")
+                .Append(userName)
+                .Append(" ---\n");
             var grouped = memories.GroupBy(m => m.Category).OrderBy(g => g.Key);
             foreach (var group in grouped)
             {
-                prompt += $"[{group.Key}]\n";
+                promptBuilder.Append('[').Append(group.Key).Append("]\n");
                 foreach (var memory in group)
-                    prompt += $"- {memory.Key}\n";
+                    promptBuilder.Append("- ").Append(memory.Key).Append('\n');
             }
         }
 
-        return prompt;
+        return promptBuilder.ToString();
     }
 
     private static string GetTimeOfDay()

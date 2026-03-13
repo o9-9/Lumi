@@ -79,7 +79,7 @@ public partial class ChatViewModel
         return tools;
     }
 
-    private Dictionary<string, object>? BuildMcpServers(string workDir)
+    private async Task<Dictionary<string, object>?> BuildMcpServersAsync(string workDir, CancellationToken ct)
     {
         var allServers = _dataStore.Data.McpServers.Where(s => s.IsEnabled).ToList();
 
@@ -133,7 +133,7 @@ public partial class ChatViewModel
         }
 
         // Add workspace MCP servers from .vscode/mcp.json (VS Code convention)
-        MergeWorkspaceMcpServers(workDir, dict);
+        await MergeWorkspaceMcpServersAsync(workDir, dict, ct);
 
         return dict.Count > 0 ? dict : null;
     }
@@ -143,14 +143,14 @@ public partial class ChatViewModel
     /// not already present into the MCP server dictionary. This allows workspace
     /// MCP configs (VS Code convention) to be available in Copilot sessions.
     /// </summary>
-    private static void MergeWorkspaceMcpServers(string workDir, Dictionary<string, object> dict)
+    private static async Task MergeWorkspaceMcpServersAsync(string workDir, Dictionary<string, object> dict, CancellationToken ct)
     {
         var mcpJsonPath = Path.Combine(workDir, ".vscode", "mcp.json");
         if (!File.Exists(mcpJsonPath)) return;
 
         try
         {
-            var json = File.ReadAllText(mcpJsonPath);
+            var json = await File.ReadAllTextAsync(mcpJsonPath, ct);
             using var doc = System.Text.Json.JsonDocument.Parse(json);
 
             if (!doc.RootElement.TryGetProperty("servers", out var servers)) return;

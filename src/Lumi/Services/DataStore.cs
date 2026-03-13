@@ -20,8 +20,11 @@ public class DataStore
 
     private AppData _data;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly SemaphoreSlim _skillSyncLock = new(1, 1);
     private readonly object _chatLoadLocksSync = new();
     private readonly Dictionary<Guid, SemaphoreSlim> _chatLoadLocks = new();
+    private int? _activeSkillSyncHash;
+    private string? _activeSkillSyncDirectory;
 
     public DataStore()
     {
@@ -273,32 +276,64 @@ public class DataStore
     public async Task<string> SyncSkillFilesForIdsAsync(List<Guid> skillIds, CancellationToken cancellationToken = default)
     {
         var dir = Path.Combine(AppDir, "active-skills");
-        Directory.CreateDirectory(dir);
+        var skillIdSet = skillIds.Count > 0 ? skillIds.ToHashSet() : null;
+        var skills = skillIdSet is { Count: > 0 }
+            ? _data.Skills.Where(s => skillIdSet.Contains(s.Id)).OrderBy(s => s.Id).ToList()
+            : _data.Skills.OrderBy(s => s.Id).ToList();
+        var syncHash = BuildSkillSyncHash(skills);
 
-        // Clear previous
-        foreach (var f in Directory.GetFiles(dir, "*.md"))
-            File.Delete(f);
+        await _skillSyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_activeSkillSyncHash == syncHash
+                && string.Equals(_activeSkillSyncDirectory, dir, StringComparison.Ordinal)
+                && Directory.Exists(dir))
+            {
+                return dir;
+            }
 
-        var skills = skillIds.Count > 0
-            ? _data.Skills.FindAll(s => skillIds.Contains(s.Id))
-            : _data.Skills;
+            Directory.CreateDirectory(dir);
 
+            foreach (var f in Directory.GetFiles(dir, "*.md"))
+                File.Delete(f);
+
+            foreach (var skill in skills)
+            {
+                var safeName = SanitizeFileName(skill.Name);
+                var filePath = Path.Combine(dir, $"{safeName}.md");
+                var content = $"""
+                    ---
+                    name: {skill.Name}
+                    description: {skill.Description}
+                    ---
+
+                    {skill.Content}
+                    """;
+                await File.WriteAllTextAsync(filePath, content, cancellationToken).ConfigureAwait(false);
+            }
+
+            _activeSkillSyncHash = syncHash;
+            _activeSkillSyncDirectory = dir;
+            return dir;
+        }
+        finally
+        {
+            _skillSyncLock.Release();
+        }
+    }
+
+    private static int BuildSkillSyncHash(IReadOnlyList<Skill> skills)
+    {
+        var hash = new HashCode();
+        hash.Add(skills.Count);
         foreach (var skill in skills)
         {
-            var safeName = SanitizeFileName(skill.Name);
-            var filePath = Path.Combine(dir, $"{safeName}.md");
-            var content = $"""
-                ---
-                name: {skill.Name}
-                description: {skill.Description}
-                ---
-
-                {skill.Content}
-                """;
-            await File.WriteAllTextAsync(filePath, content, cancellationToken).ConfigureAwait(false);
+            hash.Add(skill.Id);
+            hash.Add(skill.Name, StringComparer.Ordinal);
+            hash.Add(skill.Description, StringComparer.Ordinal);
+            hash.Add(skill.Content, StringComparer.Ordinal);
         }
-
-        return dir;
+        return hash.ToHashCode();
     }
 
     private static string SanitizeFileName(string name)
