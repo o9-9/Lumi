@@ -60,6 +60,11 @@ internal static class TranscriptPageWeightEstimator
             UserMessageItem user => EstimateTextWeight(user.Content, 2),
             ErrorMessageItem error => EstimateTextWeight(error.Content, 2),
             ReasoningItem reasoning => EstimateTextWeight(reasoning.Content, 4),
+            SubagentToolCallItem subagent => Math.Max(
+                4,
+                2 + subagent.Activities.Count
+                  + EstimateAdditionalTextWeight(subagent.TranscriptText)
+                  + EstimateAdditionalTextWeight(subagent.ReasoningText)),
             ToolGroupItem toolGroup => Math.Max(4, 2 + toolGroup.ToolCalls.Count),
             QuestionItem => 3,
             PlanCardItem => 3,
@@ -67,6 +72,14 @@ internal static class TranscriptPageWeightEstimator
             SingleToolItem => 3,
             _ => 2,
         };
+    }
+
+    private static int EstimateAdditionalTextWeight(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return 0;
+
+        return 1 + Math.Min(6, Math.Max(0, text.Length / 450));
     }
 
     private static int EstimateTextWeight(string? text, int baseWeight)

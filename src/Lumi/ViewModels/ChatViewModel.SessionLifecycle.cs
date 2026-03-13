@@ -44,6 +44,13 @@ public partial class ChatViewModel
         var externalToolCallIdByRequestId = new Dictionary<string, string>(StringComparer.Ordinal);
         StreamingTextAccumulator? assistantStream = null;
         StreamingTextAccumulator? reasoningStream = null;
+        var activeSubagentSelectionDepth = 0;
+        var activeSubagentExecutionDepth = 0;
+        var subagentStateGate = new object();
+        var activeSubagentToolCallIds = new List<string>();
+        var subagentAssistantStreams = new Dictionary<string, StreamingTextAccumulator>(StringComparer.Ordinal);
+        var subagentReasoningStreams = new Dictionary<string, StreamingTextAccumulator>(StringComparer.Ordinal);
+        string? mostRecentSubagentToolCallId = null;
 
         static string FormatPermissionResult(PermissionCompletedDataResultKind kind) => kind switch
         {
@@ -54,6 +61,223 @@ public partial class ChatViewModel
             PermissionCompletedDataResultKind.DeniedByContentExclusionPolicy => "denied by policy",
             _ => kind.ToString()
         };
+
+        bool IsSubagentOutputActive()
+            => Volatile.Read(ref activeSubagentSelectionDepth) > 0
+               || Volatile.Read(ref activeSubagentExecutionDepth) > 0;
+
+        static string? GetSubagentToolCallIdFromParent(string? parentToolCallId)
+            => string.IsNullOrWhiteSpace(parentToolCallId) ? null : parentToolCallId;
+
+        string? GetActiveSubagentToolCallId()
+        {
+            lock (subagentStateGate)
+                return activeSubagentToolCallIds.Count == 0 ? null : activeSubagentToolCallIds[^1];
+        }
+
+        string? GetCurrentSubagentOutputToolCallId()
+        {
+            var activeToolCallId = GetActiveSubagentToolCallId();
+            if (!string.IsNullOrWhiteSpace(activeToolCallId))
+                return activeToolCallId;
+
+            if (!IsSubagentOutputActive())
+                return null;
+
+            lock (subagentStateGate)
+                return mostRecentSubagentToolCallId;
+        }
+
+        void RegisterActiveSubagent(string? toolCallId)
+        {
+            if (string.IsNullOrWhiteSpace(toolCallId))
+                return;
+
+            lock (subagentStateGate)
+            {
+                activeSubagentToolCallIds.Add(toolCallId);
+                mostRecentSubagentToolCallId = toolCallId;
+            }
+        }
+
+        void UnregisterActiveSubagent(string? toolCallId)
+        {
+            if (string.IsNullOrWhiteSpace(toolCallId))
+                return;
+
+            lock (subagentStateGate)
+            {
+                for (var i = activeSubagentToolCallIds.Count - 1; i >= 0; i--)
+                {
+                    if (!string.Equals(activeSubagentToolCallIds[i], toolCallId, StringComparison.Ordinal))
+                        continue;
+
+                    activeSubagentToolCallIds.RemoveAt(i);
+                    break;
+                }
+
+                mostRecentSubagentToolCallId = activeSubagentToolCallIds.Count > 0
+                    ? activeSubagentToolCallIds[^1]
+                    : toolCallId;
+            }
+        }
+
+        StreamingTextAccumulator GetOrCreateSubagentStream(
+            Dictionary<string, StreamingTextAccumulator> streams,
+            string toolCallId,
+            int initialCapacity,
+            Action<string> flushAction)
+        {
+            lock (subagentStateGate)
+            {
+                if (!streams.TryGetValue(toolCallId, out var stream))
+                {
+                    stream = new StreamingTextAccumulator(
+                        initialCapacity,
+                        TimeSpan.FromMilliseconds(StreamingUiUpdateThrottleMs),
+                        () => flushAction(toolCallId));
+                    streams[toolCallId] = stream;
+                }
+
+                return stream;
+            }
+        }
+
+        StreamingTextAccumulator? GetSubagentStream(
+            Dictionary<string, StreamingTextAccumulator> streams,
+            string toolCallId)
+        {
+            lock (subagentStateGate)
+                return streams.TryGetValue(toolCallId, out var stream) ? stream : null;
+        }
+
+        void DisposeSubagentStream(
+            Dictionary<string, StreamingTextAccumulator> streams,
+            string toolCallId)
+        {
+            StreamingTextAccumulator? stream = null;
+            lock (subagentStateGate)
+            {
+                if (streams.TryGetValue(toolCallId, out stream))
+                    streams.Remove(toolCallId);
+            }
+
+            stream?.Dispose();
+        }
+
+        void UpdateSubagentCardContent(
+            string toolCallId,
+            bool updateTranscript = false,
+            string? transcript = null,
+            bool updateReasoning = false,
+            string? reasoning = null)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                var toolMsg = chat.Messages.LastOrDefault(m => m.ToolCallId == toolCallId);
+                if (toolMsg is null)
+                    return;
+
+                var description = ToolDisplayHelper.ExtractJsonField(toolMsg.Content, "description") ?? string.Empty;
+                var agentName = ToolDisplayHelper.ExtractJsonField(toolMsg.Content, "agentName");
+                if (string.IsNullOrWhiteSpace(agentName)
+                    && toolMsg.ToolName?.StartsWith("agent:", StringComparison.Ordinal) == true)
+                {
+                    agentName = toolMsg.ToolName["agent:".Length..];
+                }
+
+                var agentDisplayName = ToolDisplayHelper.ExtractJsonField(toolMsg.Content, "agentDisplayName")
+                    ?? toolMsg.Author
+                    ?? agentName
+                    ?? "Agent";
+                var agentDescription = ToolDisplayHelper.ExtractJsonField(toolMsg.Content, "agentDescription");
+                var mode = ToolDisplayHelper.ExtractJsonField(toolMsg.Content, "mode") ?? string.Empty;
+                var nextTranscript = updateTranscript
+                    ? transcript ?? string.Empty
+                    : ToolDisplayHelper.ExtractJsonField(toolMsg.Content, "transcript");
+                var nextReasoning = updateReasoning
+                    ? reasoning ?? string.Empty
+                    : ToolDisplayHelper.ExtractJsonField(toolMsg.Content, "reasoning");
+
+                var nextContent = BuildSubagentPayloadJson(
+                    description,
+                    agentName,
+                    agentDisplayName,
+                    agentDescription,
+                    mode,
+                    nextTranscript,
+                    nextReasoning);
+
+                if (string.Equals(toolMsg.Content, nextContent, StringComparison.Ordinal))
+                    return;
+
+                toolMsg.Content = nextContent;
+                if (_activeSession == session)
+                {
+                    var vm = Messages.LastOrDefault(m => m.Message.ToolCallId == toolCallId);
+                    vm?.NotifyContentChanged();
+                }
+            });
+        }
+
+        void FlushSubagentAssistantDelta(string toolCallId)
+        {
+            var stream = GetSubagentStream(subagentAssistantStreams, toolCallId);
+            var currentContent = stream?.SnapshotOrNull();
+            if (currentContent is null)
+                return;
+
+            // Direct update for immediate UI visibility (runs on UI thread via UiThrottler)
+            _transcriptBuilder.UpdateSubagentTranscriptText(toolCallId, currentContent);
+            // Persist to ChatMessage JSON for transcript rebuilds
+            UpdateSubagentCardContent(toolCallId, updateTranscript: true, transcript: currentContent);
+        }
+
+        void FlushSubagentReasoningDelta(string toolCallId)
+        {
+            var stream = GetSubagentStream(subagentReasoningStreams, toolCallId);
+            var currentContent = stream?.SnapshotOrNull();
+            if (currentContent is null)
+                return;
+
+            _transcriptBuilder.UpdateSubagentReasoningText(toolCallId, currentContent);
+            UpdateSubagentCardContent(toolCallId, updateReasoning: true, reasoning: currentContent);
+        }
+
+        void CompleteSubagentStreams(string? toolCallId)
+        {
+            if (string.IsNullOrWhiteSpace(toolCallId))
+                return;
+
+            var assistantSubagentStream = GetSubagentStream(subagentAssistantStreams, toolCallId);
+            assistantSubagentStream?.CancelPending();
+            FlushSubagentAssistantDelta(toolCallId);
+            DisposeSubagentStream(subagentAssistantStreams, toolCallId);
+
+            var reasoningSubagentStream = GetSubagentStream(subagentReasoningStreams, toolCallId);
+            reasoningSubagentStream?.CancelPending();
+            FlushSubagentReasoningDelta(toolCallId);
+            DisposeSubagentStream(subagentReasoningStreams, toolCallId);
+        }
+
+        void ResetSubagentOutputState()
+        {
+            Volatile.Write(ref activeSubagentSelectionDepth, 0);
+            Volatile.Write(ref activeSubagentExecutionDepth, 0);
+            List<StreamingTextAccumulator> streamsToDispose = [];
+            lock (subagentStateGate)
+            {
+                activeSubagentToolCallIds.Clear();
+                mostRecentSubagentToolCallId = null;
+                streamsToDispose.AddRange(subagentAssistantStreams.Values);
+                streamsToDispose.AddRange(subagentReasoningStreams.Values);
+                subagentAssistantStreams.Clear();
+                subagentReasoningStreams.Clear();
+            }
+
+            foreach (var stream in streamsToDispose)
+                stream.Dispose();
+        }
 
         void FlushAssistantDelta()
         {
@@ -164,10 +388,54 @@ public partial class ChatViewModel
                     break;
 
                 case AssistantMessageDeltaEvent delta:
+                    var activeSubagentToolCallIdForAssistantDelta =
+                        GetSubagentToolCallIdFromParent(delta.Data.ParentToolCallId)
+                        ?? GetCurrentSubagentOutputToolCallId();
+                    if (!string.IsNullOrWhiteSpace(activeSubagentToolCallIdForAssistantDelta))
+                    {
+                        GetOrCreateSubagentStream(
+                            subagentAssistantStreams,
+                            activeSubagentToolCallIdForAssistantDelta,
+                            2048,
+                            FlushSubagentAssistantDelta)
+                            .Append(delta.Data.DeltaContent);
+                        break;
+                    }
+                    if (IsSubagentOutputActive())
+                        break;
                     assistantStream.Append(delta.Data.DeltaContent);
                     break;
 
                 case AssistantMessageEvent msg:
+                    var activeSubagentToolCallIdForAssistantMessage =
+                        GetSubagentToolCallIdFromParent(msg.Data.ParentToolCallId)
+                        ?? GetCurrentSubagentOutputToolCallId();
+                    if (!string.IsNullOrWhiteSpace(activeSubagentToolCallIdForAssistantMessage))
+                    {
+                        var subagentAssistantStream = GetSubagentStream(
+                            subagentAssistantStreams,
+                            activeSubagentToolCallIdForAssistantMessage);
+                        subagentAssistantStream?.CancelPending();
+                        var capturedTranscript = msg.Data.Content;
+                        var capturedReasoning = msg.Data.ReasoningText;
+                        var capturedToolCallId = activeSubagentToolCallIdForAssistantMessage;
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            _transcriptBuilder.UpdateSubagentTranscriptText(capturedToolCallId, capturedTranscript);
+                            if (!string.IsNullOrWhiteSpace(capturedReasoning))
+                                _transcriptBuilder.UpdateSubagentReasoningText(capturedToolCallId, capturedReasoning);
+                        });
+                        UpdateSubagentCardContent(
+                            activeSubagentToolCallIdForAssistantMessage,
+                            updateTranscript: true,
+                            transcript: msg.Data.Content,
+                            updateReasoning: !string.IsNullOrWhiteSpace(msg.Data.ReasoningText),
+                            reasoning: msg.Data.ReasoningText);
+                        subagentAssistantStream?.Clear();
+                        break;
+                    }
+                    if (IsSubagentOutputActive())
+                        break;
                     assistantStream.CancelPending();
                     Dispatcher.UIThread.Post(() =>
                     {
@@ -238,10 +506,47 @@ public partial class ChatViewModel
                     break;
 
                 case AssistantReasoningDeltaEvent rd:
+                    var activeSubagentToolCallIdForReasoningDelta = GetCurrentSubagentOutputToolCallId();
+                    if (!string.IsNullOrWhiteSpace(activeSubagentToolCallIdForReasoningDelta))
+                    {
+                        GetOrCreateSubagentStream(
+                            subagentReasoningStreams,
+                            activeSubagentToolCallIdForReasoningDelta,
+                            1024,
+                            FlushSubagentReasoningDelta)
+                            .Append(rd.Data.DeltaContent);
+                        break;
+                    }
+
+                    if (IsSubagentOutputActive())
+                        break;
                     reasoningStream.Append(rd.Data.DeltaContent);
                     break;
 
                 case AssistantReasoningEvent r:
+                    var activeSubagentToolCallIdForReasoning = GetCurrentSubagentOutputToolCallId();
+                    if (!string.IsNullOrWhiteSpace(activeSubagentToolCallIdForReasoning))
+                    {
+                        var subagentReasoningStream = GetSubagentStream(
+                            subagentReasoningStreams,
+                            activeSubagentToolCallIdForReasoning);
+                        subagentReasoningStream?.CancelPending();
+                        var capturedReasoningContent = r.Data.Content;
+                        var capturedReasoningToolCallId = activeSubagentToolCallIdForReasoning;
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            _transcriptBuilder.UpdateSubagentReasoningText(capturedReasoningToolCallId, capturedReasoningContent);
+                        });
+                        UpdateSubagentCardContent(
+                            activeSubagentToolCallIdForReasoning,
+                            updateReasoning: true,
+                            reasoning: r.Data.Content);
+                        subagentReasoningStream?.Clear();
+                        break;
+                    }
+
+                    if (IsSubagentOutputActive())
+                        break;
                     reasoningStream.CancelPending();
                     Dispatcher.UIThread.Post(() =>
                     {
@@ -576,6 +881,7 @@ public partial class ChatViewModel
                 case AssistantTurnEndEvent:
                     assistantStream.CancelPending();
                     reasoningStream.CancelPending();
+                    ResetSubagentOutputState();
                     Dispatcher.UIThread.Post(() =>
                     {
                     runtime.IsBusy = false;
@@ -638,6 +944,7 @@ public partial class ChatViewModel
                 case SessionErrorEvent err:
                     assistantStream.CancelPending();
                     reasoningStream.CancelPending();
+                    ResetSubagentOutputState();
                     Dispatcher.UIThread.Post(() =>
                     {
                     // Clean up any in-progress streaming message
@@ -745,6 +1052,7 @@ public partial class ChatViewModel
                 case AbortEvent abort:
                     assistantStream.CancelPending();
                     reasoningStream.CancelPending();
+                    ResetSubagentOutputState();
                     Dispatcher.UIThread.Post(() =>
                     {
                     // SDK-initiated abort — clean up streaming state
@@ -800,6 +1108,7 @@ public partial class ChatViewModel
                 case SessionShutdownEvent shutdown:
                     assistantStream.CancelPending();
                     reasoningStream.CancelPending();
+                    ResetSubagentOutputState();
                     Dispatcher.UIThread.Post(() =>
                     {
                     // Session terminated server-side — invalidate cached session
@@ -838,15 +1147,22 @@ public partial class ChatViewModel
                     break;
 
                 case SubagentSelectedEvent:
-                    // Informational only — the subagent was selected but hasn't started yet.
-                    // No UI action needed; SubagentStartedEvent will create the tool entry.
+                    Interlocked.Increment(ref activeSubagentSelectionDepth);
                     break;
 
                 case SubagentDeselectedEvent:
-                    // Informational only — the subagent was deselected after finishing.
+                    if (Volatile.Read(ref activeSubagentSelectionDepth) > 0)
+                        Interlocked.Decrement(ref activeSubagentSelectionDepth);
+                    if (!IsSubagentOutputActive())
+                    {
+                        lock (subagentStateGate)
+                            mostRecentSubagentToolCallId = null;
+                    }
                     break;
 
                 case SubagentStartedEvent subStart:
+                    Interlocked.Increment(ref activeSubagentExecutionDepth);
+                    RegisterActiveSubagent(subStart.Data.ToolCallId);
                     Dispatcher.UIThread.Post(() =>
                     {
                     var displayName = subStart.Data.AgentDisplayName ?? subStart.Data.AgentName ?? "Agent";
@@ -856,7 +1172,9 @@ public partial class ChatViewModel
                         agentName: subStart.Data.AgentName,
                         agentDisplayName: displayName,
                         agentDescription: subStart.Data.AgentDescription,
-                        mode: string.Empty);
+                        mode: string.Empty,
+                        transcript: GetSubagentStream(subagentAssistantStreams, subStart.Data.ToolCallId)?.SnapshotOrNull(),
+                        reasoning: GetSubagentStream(subagentReasoningStreams, subStart.Data.ToolCallId)?.SnapshotOrNull());
 
                     // The SDK fires ToolExecutionStartEvent before SubagentStartedEvent
                     // with the same ToolCallId — reuse that message instead of duplicating.
@@ -865,13 +1183,19 @@ public partial class ChatViewModel
                     {
                         var existingDescription = ToolDisplayHelper.ExtractJsonField(existing.Content, "description") ?? string.Empty;
                         var existingMode = ToolDisplayHelper.ExtractJsonField(existing.Content, "mode") ?? string.Empty;
+                        var existingTranscript = ToolDisplayHelper.ExtractJsonField(existing.Content, "transcript")
+                            ?? GetSubagentStream(subagentAssistantStreams, subStart.Data.ToolCallId)?.SnapshotOrNull();
+                        var existingReasoning = ToolDisplayHelper.ExtractJsonField(existing.Content, "reasoning")
+                            ?? GetSubagentStream(subagentReasoningStreams, subStart.Data.ToolCallId)?.SnapshotOrNull();
                         existing.ToolName = $"agent:{subStart.Data.AgentName}";
                         existing.Content = BuildSubagentPayloadJson(
                             description: existingDescription,
                             agentName: subStart.Data.AgentName,
                             agentDisplayName: displayName,
                             agentDescription: subStart.Data.AgentDescription,
-                            mode: existingMode);
+                            mode: existingMode,
+                            transcript: existingTranscript,
+                            reasoning: existingReasoning);
                         existing.Author = displayName;
                         if (_activeSession == session)
                         {
@@ -904,6 +1228,10 @@ public partial class ChatViewModel
                     break;
 
                 case SubagentCompletedEvent subEnd:
+                    if (Volatile.Read(ref activeSubagentExecutionDepth) > 0)
+                        Interlocked.Decrement(ref activeSubagentExecutionDepth);
+                    UnregisterActiveSubagent(subEnd.Data.ToolCallId);
+                    CompleteSubagentStreams(subEnd.Data.ToolCallId);
                     Dispatcher.UIThread.Post(() =>
                     {
                     // Mark ALL messages with this ToolCallId as Completed
@@ -919,6 +1247,10 @@ public partial class ChatViewModel
                     break;
 
                 case SubagentFailedEvent subFail:
+                    if (Volatile.Read(ref activeSubagentExecutionDepth) > 0)
+                        Interlocked.Decrement(ref activeSubagentExecutionDepth);
+                    UnregisterActiveSubagent(subFail.Data.ToolCallId);
+                    CompleteSubagentStreams(subFail.Data.ToolCallId);
                     Dispatcher.UIThread.Post(() =>
                     {
                     // Mark ALL messages with this ToolCallId as Failed

@@ -274,7 +274,9 @@ public partial class ChatViewModel : ObservableObject
         string? agentName,
         string? agentDisplayName,
         string? agentDescription,
-        string? mode)
+        string? mode,
+        string? transcript = null,
+        string? reasoning = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -285,6 +287,8 @@ public partial class ChatViewModel : ObservableObject
             writer.WriteString("agentDisplayName", agentDisplayName ?? string.Empty);
             writer.WriteString("agentDescription", agentDescription ?? string.Empty);
             writer.WriteString("mode", mode ?? string.Empty);
+            writer.WriteString("transcript", transcript ?? string.Empty);
+            writer.WriteString("reasoning", reasoning ?? string.Empty);
             writer.WriteEndObject();
         }
 

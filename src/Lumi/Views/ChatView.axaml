@@ -475,11 +475,28 @@
           </Border>
         </sc:StrataThink.HeaderExtra>
         <sc:StrataThink.Content>
-          <ItemsControl ItemsSource="{Binding Activities}">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate><StackPanel Spacing="3" /></ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-          </ItemsControl>
+          <StackPanel Spacing="6">
+            <sc:StrataThink Label="{loc:Str Tool_ReasoningLabel}"
+                            IsExpanded="True"
+                            IsActive="{Binding IsActive}"
+                            IsVisible="{Binding HasReasoningText}">
+              <sc:StrataThink.Content>
+                <lc:TranscriptTextContent Text="{Binding ReasoningText}"
+                                          PreferPlainText="{Binding IsActive}" />
+              </sc:StrataThink.Content>
+            </sc:StrataThink>
+
+            <lc:TranscriptTextContent Text="{Binding TranscriptText}"
+                                      PreferPlainText="{Binding IsActive}"
+                                      IsVisible="{Binding HasTranscriptText}" />
+
+            <ItemsControl ItemsSource="{Binding Activities}"
+                          IsVisible="{Binding HasActivities}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><StackPanel Spacing="3" /></ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+          </StackPanel>
         </sc:StrataThink.Content>
       </sc:StrataThink>
     </DataTemplate>

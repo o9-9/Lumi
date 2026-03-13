@@ -500,6 +500,20 @@ public class TranscriptBuilder
         _currentToolGroupCount++;
     }
 
+    /// <summary>Directly updates the transcript text on a subagent card (called from live streaming flush).</summary>
+    public void UpdateSubagentTranscriptText(string toolCallId, string? text)
+    {
+        if (_subagentsByToolCallId.TryGetValue(toolCallId, out var subagent))
+            subagent.TranscriptText = text;
+    }
+
+    /// <summary>Directly updates the reasoning text on a subagent card (called from live streaming flush).</summary>
+    public void UpdateSubagentReasoningText(string toolCallId, string? text)
+    {
+        if (_subagentsByToolCallId.TryGetValue(toolCallId, out var subagent))
+            subagent.ReasoningText = text;
+    }
+
     private SubagentToolCallItem? FindOwningSubagent(string? parentToolCallId)
     {
         var current = parentToolCallId;
@@ -522,6 +536,8 @@ public class TranscriptBuilder
         subagent.TaskDescription = ToolDisplayHelper.GetSubagentTaskDescription(toolName, message.Content);
         subagent.AgentDescription = ToolDisplayHelper.GetSubagentDescription(message.Content);
         subagent.ModeLabel = ToolDisplayHelper.GetSubagentModeLabel(message.Content);
+        subagent.TranscriptText = ToolDisplayHelper.ExtractJsonField(message.Content, "transcript");
+        subagent.ReasoningText = ToolDisplayHelper.ExtractJsonField(message.Content, "reasoning");
     }
 
     private void UpdateSubagentState(SubagentToolCallItem subagent)

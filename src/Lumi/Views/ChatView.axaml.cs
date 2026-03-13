@@ -521,7 +521,8 @@ public partial class ChatView : UserControl
         foreach (var item in turn.Items)
         {
             if (item is AssistantMessageItem { IsStreaming: true }
-                or ReasoningItem { IsActive: true })
+                or ReasoningItem { IsActive: true }
+                or SubagentToolCallItem { IsActive: true })
             {
                 return true;
             }
