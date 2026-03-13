@@ -461,6 +461,30 @@
       </sc:StrataThink>
     </DataTemplate>
 
+    <!-- ── Subagent card (standalone turn-level item) ── -->
+    <DataTemplate DataType="vm:SubagentToolCallItem">
+      <sc:StrataThink Label="{Binding Title}"
+                      Meta="{Binding Meta}"
+                      IsExpanded="{Binding IsExpanded}"
+                      IsActive="{Binding IsActive}"
+                      ProgressValue="{Binding ProgressValue}">
+        <sc:StrataThink.HeaderExtra>
+          <Border Background="{DynamicResource Brush.AccentSubtle}"
+                  CornerRadius="999" Padding="6,1">
+            <TextBlock Text="{Binding DisplayName}" Classes="caption"
+                       Foreground="{DynamicResource Brush.AccentDefault}" />
+          </Border>
+        </sc:StrataThink.HeaderExtra>
+        <sc:StrataThink.Content>
+          <ItemsControl ItemsSource="{Binding Activities}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Spacing="3" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+        </sc:StrataThink.Content>
+      </sc:StrataThink>
+    </DataTemplate>
+
     <!-- ── Regular tool call (inside tool group) ────── -->
     <DataTemplate DataType="vm:ToolCallItem">
       <sc:StrataAiToolCall ToolName="{Binding ToolName}"

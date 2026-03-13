@@ -167,7 +167,7 @@ public static partial class ToolDisplayHelper
                 return (Loc.Tool_RunningQuery, ExtractJsonField(argsJson, "description"));
             case "task":
             {
-                var agentType = ExtractJsonField(argsJson, "agent_type") ?? "agent";
+                var agentType = FormatAgentName(ExtractJsonField(argsJson, "agent_type")) ?? "Agent";
                 var desc = ExtractJsonField(argsJson, "description");
                 return (string.Format(Loc.Tool_RunningAgent, agentType), desc);
             }
@@ -176,8 +176,9 @@ public static partial class ToolDisplayHelper
                 // agent:explore, agent:task, agent:Coding Lumi, etc.
                 if (toolName.StartsWith("agent:", StringComparison.Ordinal))
                 {
-                    var agentName = toolName["agent:".Length..];
-                    var desc = ExtractJsonField(argsJson, "description");
+                    var agentName = GetSubagentDisplayName(toolName, argsJson, author);
+                    var desc = GetSubagentTaskDescription(toolName, argsJson)
+                        ?? GetSubagentDescription(argsJson);
                     return (string.Format(Loc.Tool_RunningAgent, agentName), desc);
                 }
                 var displayName = author ?? FormatToolNameFriendly(toolName);
@@ -194,9 +195,20 @@ public static partial class ToolDisplayHelper
     {
         if (string.IsNullOrWhiteSpace(argsJson)) return null;
 
-        // Agent tools have a plain-text description as content, not JSON args
         if (toolName.StartsWith("agent:", StringComparison.Ordinal))
-            return null;
+        {
+            var taskDescription = GetSubagentTaskDescription(toolName, argsJson);
+            var agentDescription = GetSubagentDescription(argsJson);
+            var mode = GetSubagentModeLabel(argsJson);
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(taskDescription))
+                sb.AppendLine($"**Task:** {taskDescription}");
+            if (!string.IsNullOrWhiteSpace(agentDescription))
+                sb.AppendLine($"**Agent:** {agentDescription}");
+            if (!string.IsNullOrWhiteSpace(mode))
+                sb.AppendLine($"**Mode:** {mode}");
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : null;
+        }
 
         try
         {
@@ -328,6 +340,55 @@ public static partial class ToolDisplayHelper
             return doc.RootElement.TryGetProperty(fieldName, out var val) ? val.GetString() : null;
         }
         catch { return null; }
+    }
+
+    public static string GetSubagentDisplayName(string toolName, string? argsJson, string? author)
+    {
+        var displayName = ExtractJsonField(argsJson, "agentDisplayName");
+        if (!string.IsNullOrWhiteSpace(displayName))
+            return displayName;
+
+        if (toolName == "task")
+        {
+            var agentType = FormatAgentName(ExtractJsonField(argsJson, "agent_type"));
+            if (!string.IsNullOrWhiteSpace(agentType))
+                return agentType;
+        }
+
+        if (toolName.StartsWith("agent:", StringComparison.Ordinal))
+        {
+            var explicitName = ExtractJsonField(argsJson, "agentName");
+            if (!string.IsNullOrWhiteSpace(explicitName))
+                return FormatAgentName(explicitName) ?? explicitName;
+
+            var suffix = toolName["agent:".Length..];
+            if (!string.IsNullOrWhiteSpace(suffix))
+                return FormatAgentName(suffix) ?? suffix;
+        }
+
+        return !string.IsNullOrWhiteSpace(author) ? author : "Agent";
+    }
+
+    public static string? GetSubagentTaskDescription(string toolName, string? argsJson)
+    {
+        if (string.IsNullOrWhiteSpace(argsJson))
+            return null;
+
+        return toolName == "task" || toolName.StartsWith("agent:", StringComparison.Ordinal)
+            ? ExtractJsonField(argsJson, "description")
+            : null;
+    }
+
+    public static string? GetSubagentDescription(string? argsJson)
+        => ExtractJsonField(argsJson, "agentDescription");
+
+    public static string? GetSubagentModeLabel(string? argsJson)
+    {
+        var mode = ExtractJsonField(argsJson, "mode");
+        if (string.IsNullOrWhiteSpace(mode))
+            return null;
+
+        return FormatAgentName(mode);
     }
 
     /// <summary>Extracts all file diffs from tool call args JSON.</summary>
@@ -579,6 +640,15 @@ public static partial class ToolDisplayHelper
         if (string.IsNullOrEmpty(toolName)) return Loc.Tool_Action;
         var cleaned = toolName.Replace('_', ' ').Replace('.', ' ').Trim();
         return cleaned.Length == 0 ? Loc.Tool_Action : char.ToUpper(cleaned[0]) + cleaned[1..];
+    }
+
+    private static string? FormatAgentName(string? agentName)
+    {
+        if (string.IsNullOrWhiteSpace(agentName))
+            return null;
+
+        var normalized = agentName.Replace('-', '_');
+        return FormatSnakeCaseToTitle(normalized);
     }
 
     private static string? ExtractToolSummary(string? argsJson)

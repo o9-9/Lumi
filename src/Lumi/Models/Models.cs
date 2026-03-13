@@ -14,6 +14,7 @@ public class ChatMessage
     public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.Now;
     public string? ToolName { get; set; }
     public string? ToolCallId { get; set; }
+    public string? ParentToolCallId { get; set; }
     public string? ToolStatus { get; set; } // InProgress, Completed, Failed
     public string? ToolOutput { get; set; }
     public string? QuestionId { get; set; }

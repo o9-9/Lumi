@@ -344,6 +344,70 @@ public abstract partial class ToolCallItemBase : ObservableObject
     public string StableId { get; }
 }
 
+// ── Subagent card (standalone turn-level item) ─────────
+
+public partial class SubagentToolCallItem : TranscriptItem
+{
+    [ObservableProperty] private string _displayName;
+    [ObservableProperty] private string? _taskDescription;
+    [ObservableProperty] private string? _agentDescription;
+    [ObservableProperty] private string? _currentIntent;
+    [ObservableProperty] private string? _modeLabel;
+    [ObservableProperty] private string? _meta;
+    [ObservableProperty] private double _progressValue = -1;
+    [ObservableProperty] private StrataAiToolCallStatus _status;
+    [ObservableProperty] private bool _isExpanded;
+    [ObservableProperty] private double _durationMs;
+
+    internal TodoProgressItem? TodoItem { get; set; }
+    internal string TodoToolStatus { get; set; } = "InProgress";
+    internal int TodoTotal { get; set; }
+    internal int TodoCompleted { get; set; }
+    internal int TodoFailed { get; set; }
+    internal int TodoUpdateCount { get; set; }
+
+    public ObservableCollection<ToolCallItemBase> Activities { get; } = [];
+
+    public string Title
+        => !string.IsNullOrWhiteSpace(CurrentIntent)
+            ? CurrentIntent!
+            : !string.IsNullOrWhiteSpace(TaskDescription)
+                ? TaskDescription!
+                : DisplayName;
+
+    public bool IsActive => Status == StrataAiToolCallStatus.InProgress;
+    public bool HasDescription => !string.IsNullOrWhiteSpace(AgentDescription);
+    public bool HasActivities => Activities.Count > 0;
+    public bool HasProgressValue => ProgressValue >= 0;
+    public bool IsInProgress => Status == StrataAiToolCallStatus.InProgress;
+    public bool IsCompleted => Status == StrataAiToolCallStatus.Completed;
+    public bool IsFailed => Status == StrataAiToolCallStatus.Failed;
+    public string? DurationText => DurationMs <= 0 ? null : DurationMs >= 1000 ? $"{DurationMs / 1000:F1}s" : $"{DurationMs:F0} ms";
+
+    public SubagentToolCallItem(string displayName, StrataAiToolCallStatus status, string? stableId = null)
+        : base(stableId ?? TranscriptIds.Create("subagent"))
+    {
+        _displayName = displayName;
+        _status = status;
+        Activities.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasActivities));
+    }
+
+    partial void OnDisplayNameChanged(string value) => OnPropertyChanged(nameof(Title));
+    partial void OnTaskDescriptionChanged(string? value) => OnPropertyChanged(nameof(Title));
+    partial void OnCurrentIntentChanged(string? value) => OnPropertyChanged(nameof(Title));
+    partial void OnAgentDescriptionChanged(string? value) => OnPropertyChanged(nameof(HasDescription));
+    partial void OnProgressValueChanged(double value) => OnPropertyChanged(nameof(HasProgressValue));
+    partial void OnDurationMsChanged(double value) => OnPropertyChanged(nameof(DurationText));
+
+    partial void OnStatusChanged(StrataAiToolCallStatus value)
+    {
+        OnPropertyChanged(nameof(IsActive));
+        OnPropertyChanged(nameof(IsInProgress));
+        OnPropertyChanged(nameof(IsCompleted));
+        OnPropertyChanged(nameof(IsFailed));
+    }
+}
+
 // ── Regular tool call ────────────────────────────────
 
 public partial class ToolCallItem : ToolCallItemBase

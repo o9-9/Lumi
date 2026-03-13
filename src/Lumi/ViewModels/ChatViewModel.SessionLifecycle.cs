@@ -296,6 +296,7 @@ public partial class ChatViewModel
                         {
                             Role = "tool",
                             ToolCallId = startToolCallId,
+                            ParentToolCallId = toolStart.Data.ParentToolCallId,
                             ToolName = toolStart.Data.ToolName,
                             ToolStatus = "InProgress",
                             Content = toolStart.Data.Arguments?.ToString() ?? "",
@@ -305,6 +306,7 @@ public partial class ChatViewModel
                     }
                     else
                     {
+                        toolMsg.ParentToolCallId = toolStart.Data.ParentToolCallId;
                         toolMsg.ToolName = toolStart.Data.ToolName;
                         toolMsg.ToolStatus = "InProgress";
                         toolMsg.Content = toolStart.Data.Arguments?.ToString() ?? "";
@@ -840,14 +842,27 @@ public partial class ChatViewModel
                     {
                     var displayName = subStart.Data.AgentDisplayName ?? subStart.Data.AgentName ?? "Agent";
                     runtime.StatusText = $"⚡ {displayName}";
+                    var subagentPayload = BuildSubagentPayloadJson(
+                        description: string.Empty,
+                        agentName: subStart.Data.AgentName,
+                        agentDisplayName: displayName,
+                        agentDescription: subStart.Data.AgentDescription,
+                        mode: string.Empty);
 
                     // The SDK fires ToolExecutionStartEvent before SubagentStartedEvent
                     // with the same ToolCallId — reuse that message instead of duplicating.
                     var existing = chat.Messages.LastOrDefault(m => m.ToolCallId == subStart.Data.ToolCallId);
                     if (existing is not null)
                     {
+                        var existingDescription = ToolDisplayHelper.ExtractJsonField(existing.Content, "description") ?? string.Empty;
+                        var existingMode = ToolDisplayHelper.ExtractJsonField(existing.Content, "mode") ?? string.Empty;
                         existing.ToolName = $"agent:{subStart.Data.AgentName}";
-                        existing.Content = subStart.Data.AgentDescription ?? "";
+                        existing.Content = BuildSubagentPayloadJson(
+                            description: existingDescription,
+                            agentName: subStart.Data.AgentName,
+                            agentDisplayName: displayName,
+                            agentDescription: subStart.Data.AgentDescription,
+                            mode: existingMode);
                         existing.Author = displayName;
                         if (_activeSession == session)
                         {
@@ -865,7 +880,7 @@ public partial class ChatViewModel
                             ToolCallId = subStart.Data.ToolCallId,
                             ToolName = $"agent:{subStart.Data.AgentName}",
                             ToolStatus = "InProgress",
-                            Content = subStart.Data.AgentDescription ?? "",
+                            Content = subagentPayload,
                             Author = displayName
                         };
                         chat.Messages.Add(toolMsg);

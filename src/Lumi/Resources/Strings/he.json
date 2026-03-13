@@ -198,7 +198,7 @@
   "Tool_RunningQuery": "מריץ שאילתה",
   "Tool_RunningAgent": "מריץ {0}",
 
-  "ToolGroup_Working": "עובד\u2026",
+  "ToolGroup_Working":"עובד\u2026",
   "ToolGroup_WorkingCount": "עובד ({0} פעולות)\u2026",
   "ToolGroup_Finished": "הסתיים",
   "ToolGroup_FinishedCount": "{0} פעולות",

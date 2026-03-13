@@ -98,6 +98,7 @@ public class DataStore
                 Timestamp = m.Timestamp,
                 ToolName = m.ToolName,
                 ToolCallId = m.ToolCallId,
+                ParentToolCallId = m.ParentToolCallId,
                 ToolStatus = m.ToolStatus,
                 ToolOutput = m.ToolOutput,
                 IsStreaming = m.IsStreaming,

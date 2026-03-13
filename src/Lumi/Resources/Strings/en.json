@@ -197,7 +197,7 @@
   "Tool_RunningQuery": "Running query",
   "Tool_RunningAgent": "Running {0}",
 
-  "ToolGroup_Working": "Working\u2026",
+  "ToolGroup_Working":"Working\u2026",
   "ToolGroup_WorkingCount": "Working ({0} actions)\u2026",
   "ToolGroup_Finished": "Finished",
   "ToolGroup_FinishedCount": "Finished {0} actions",

@@ -30,6 +30,8 @@ public class TranscriptBuilder
     private TranscriptTurn? _typingTurn;
     private TranscriptTurn? _currentTurn;
     private readonly Dictionary<string, TerminalPreviewItem> _terminalPreviewsByToolCallId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> _toolParentById = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SubagentToolCallItem> _subagentsByToolCallId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _toolStartTimes = [];
     public List<FileAttachmentItem> PendingToolFileChips { get; } = [];
     public List<(string FilePath, string ToolName, string? OldText, string? NewText)> PendingFileEdits { get; } = [];
@@ -100,12 +102,22 @@ public class TranscriptBuilder
         _currentTurn = null;
         _pendingPlanCard = null;
         _terminalPreviewsByToolCallId.Clear();
+        _toolParentById.Clear();
+        _subagentsByToolCallId.Clear();
         _toolStartTimes.Clear();
         PendingToolFileChips.Clear();
         PendingFileEdits.Clear();
         PendingFetchedSkillRefs.Clear();
         ShownFileChips.Clear();
     }
+
+    private static StrataAiToolCallStatus MapToolStatus(string? status)
+        => status switch
+        {
+            "Completed" => StrataAiToolCallStatus.Completed,
+            "Failed" => StrataAiToolCallStatus.Failed,
+            _ => StrataAiToolCallStatus.InProgress
+        };
 
     public void ProcessMessageToTranscript(ChatMessageViewModel msgVm)
     {
@@ -127,12 +139,10 @@ public class TranscriptBuilder
         var toolName = msgVm.ToolName ?? "";
         var toolStableIdSeed = msgVm.Message.ToolCallId ?? msgVm.Message.Id.ToString();
         var turnStableId = TurnStableIdFor($"tool:{toolStableIdSeed}");
-        var initialStatus = msgVm.ToolStatus switch
-        {
-            "Completed" => StrataAiToolCallStatus.Completed,
-            "Failed" => StrataAiToolCallStatus.Failed,
-            _ => StrataAiToolCallStatus.InProgress
-        };
+        var initialStatus = MapToolStatus(msgVm.ToolStatus);
+
+        if (!string.IsNullOrWhiteSpace(msgVm.Message.ToolCallId))
+            _toolParentById[msgVm.Message.ToolCallId!] = msgVm.Message.ParentToolCallId;
 
         if (toolName is "stop_powershell" or "write_powershell" or "read_powershell"
             or "task_complete" or "read_agent" or "list_agents")
@@ -195,11 +205,20 @@ public class TranscriptBuilder
             var intentText = ToolDisplayHelper.ExtractJsonField(msgVm.Content, "intent");
             if (!string.IsNullOrEmpty(intentText))
             {
-                _currentIntentText = intentText;
-                if (showToolCalls)
+                var intentSubagent = FindOwningSubagent(msgVm.Message.ParentToolCallId);
+                if (intentSubagent is not null)
                 {
-                    EnsureCurrentToolGroup(initialStatus, toolStableIdSeed, turnStableId);
-                    UpdateToolGroupLabel();
+                    intentSubagent.CurrentIntent = intentText;
+                    UpdateSubagentState(intentSubagent);
+                }
+                else
+                {
+                    _currentIntentText = intentText;
+                    if (showToolCalls)
+                    {
+                        EnsureCurrentToolGroup(initialStatus, toolStableIdSeed, turnStableId);
+                        UpdateToolGroupLabel();
+                    }
                 }
             }
             return;
@@ -215,36 +234,50 @@ public class TranscriptBuilder
                 return;
 
             EnsureCurrentToolGroup(initialStatus, toolStableIdSeed, turnStableId);
-            _todoUpdateCount++;
-            UpsertTodoProgressToolCall(steps, msgVm.ToolStatus ?? "InProgress");
+            var todoSubagent = FindOwningSubagent(msgVm.Message.ParentToolCallId);
+            if (todoSubagent is not null)
+            {
+                UpsertSubagentTodoProgressToolCall(todoSubagent, steps, msgVm.ToolStatus ?? "InProgress");
+                if (initialStatus == StrataAiToolCallStatus.InProgress && !IsRebuildingTranscript)
+                    todoSubagent.IsExpanded = true;
+                UpdateSubagentState(todoSubagent);
+            }
+            else
+            {
+                _todoUpdateCount++;
+                UpsertTodoProgressToolCall(steps, msgVm.ToolStatus ?? "InProgress");
 
-            if (_currentToolGroup is not null && initialStatus == StrataAiToolCallStatus.InProgress && !IsRebuildingTranscript)
-                _currentToolGroup.IsExpanded = true;
+                if (_currentToolGroup is not null && initialStatus == StrataAiToolCallStatus.InProgress && !IsRebuildingTranscript)
+                    _currentToolGroup.IsExpanded = true;
 
-            UpdateToolGroupLabel();
+                UpdateToolGroupLabel();
+            }
 
             if (!IsRebuildingTranscript)
             {
-                var capturedGroup = _currentToolGroup;
-                var capturedTodoProgress = _currentTodoProgress;
-                var capturedTodoToolCall = _currentTodoToolCall;
+                var capturedGroup = todoSubagent is null ? _currentToolGroup : null;
+                var capturedSubagent = todoSubagent;
+                var capturedTodoProgress = todoSubagent is null ? _currentTodoProgress : null;
+                var capturedTodoToolCall = todoSubagent is null ? _currentTodoToolCall : null;
                 PropertyChangedEventHandler? handler = null;
                 handler = (_, args) =>
                 {
-                    if (args.PropertyName == nameof(ChatMessageViewModel.ToolStatus) && capturedTodoProgress is not null)
+                    if (args.PropertyName == nameof(ChatMessageViewModel.ToolStatus))
                     {
-                        capturedTodoProgress.ToolStatus = msgVm.ToolStatus ?? "InProgress";
-                        if (capturedTodoToolCall is not null)
+                        if (capturedSubagent is not null && capturedSubagent.TodoItem is not null)
                         {
-                            capturedTodoToolCall.Status = msgVm.ToolStatus switch
-                            {
-                                "Completed" => StrataAiToolCallStatus.Completed,
-                                "Failed" => StrataAiToolCallStatus.Failed,
-                                _ => StrataAiToolCallStatus.InProgress
-                            };
+                            capturedSubagent.TodoToolStatus = msgVm.ToolStatus ?? "InProgress";
+                            capturedSubagent.TodoItem.Status = MapToolStatus(msgVm.ToolStatus);
+                            UpdateSubagentState(capturedSubagent);
                         }
+                        else if (capturedTodoProgress is not null)
+                        {
+                            capturedTodoProgress.ToolStatus = msgVm.ToolStatus ?? "InProgress";
+                            if (capturedTodoToolCall is not null)
+                                capturedTodoToolCall.Status = MapToolStatus(msgVm.ToolStatus);
 
-                        UpdateToolGroupState(capturedGroup);
+                            UpdateToolGroupState(capturedGroup);
+                        }
 
                         if (msgVm.ToolStatus is "Completed" or "Failed")
                             msgVm.PropertyChanged -= handler;
@@ -258,6 +291,12 @@ public class TranscriptBuilder
 
         if (!showToolCalls)
             return;
+
+        if (toolName == "task" || toolName.StartsWith("agent:", StringComparison.Ordinal))
+        {
+            ProcessSubagentToolMessage(msgVm, initialStatus, toolStableIdSeed, turnStableId);
+            return;
+        }
 
         var (friendlyName, friendlyInfo) = ToolDisplayHelper.GetFriendlyToolDisplay(toolName, msgVm.Author, msgVm.Content);
         friendlyName = $"{ToolDisplayHelper.GetToolGlyph(toolName)} {friendlyName}";
@@ -279,6 +318,7 @@ public class TranscriptBuilder
 
             EnsureCurrentToolGroup(initialStatus, toolStableIdSeed, turnStableId);
             var capturedTermGroup = _currentToolGroup!;
+            var termParentSubagent = FindOwningSubagent(msgVm.Message.ParentToolCallId);
 
             if (!IsRebuildingTranscript)
             {
@@ -301,6 +341,9 @@ public class TranscriptBuilder
                         _toolStartTimes.Remove(toolCallId);
                     }
 
+                    if (termParentSubagent is not null)
+                        UpdateSubagentState(termParentSubagent);
+
                     UpdateToolGroupState(capturedTermGroup);
 
                     if (msgVm.ToolStatus is "Completed" or "Failed")
@@ -309,10 +352,11 @@ public class TranscriptBuilder
                 msgVm.PropertyChanged += handler;
             }
 
-            _currentToolGroup!.ToolCalls.Add(termPreview);
-            _currentToolGroupCount++;
+            AddToolItemToCurrentContext(termPreview, msgVm.Message.ParentToolCallId);
 
-            if (_currentToolGroup is not null && initialStatus == StrataAiToolCallStatus.InProgress && !IsRebuildingTranscript)
+            if (termParentSubagent is not null && initialStatus == StrataAiToolCallStatus.InProgress && !IsRebuildingTranscript)
+                termParentSubagent.IsExpanded = true;
+            else if (_currentToolGroup is not null && initialStatus == StrataAiToolCallStatus.InProgress && !IsRebuildingTranscript)
                 _currentToolGroup.IsExpanded = true;
 
             UpdateToolGroupLabel();
@@ -345,6 +389,7 @@ public class TranscriptBuilder
 
         EnsureCurrentToolGroup(initialStatus, toolStableIdSeed, turnStableId);
         var capturedToolGroup = _currentToolGroup!;
+        var toolParentSubagent = FindOwningSubagent(msgVm.Message.ParentToolCallId);
 
         if (!IsRebuildingTranscript)
         {
@@ -370,6 +415,9 @@ public class TranscriptBuilder
                 if (toolCall.Status == StrataAiToolCallStatus.Failed && toolCall.HasDiff && toolCall.DiffFilePath is not null)
                     PendingFileEdits.RemoveAll(fe => fe.FilePath == toolCall.DiffFilePath);
 
+                if (toolParentSubagent is not null)
+                    UpdateSubagentState(toolParentSubagent);
+
                 UpdateToolGroupState(capturedToolGroup);
 
                 if (msgVm.ToolStatus is "Completed" or "Failed")
@@ -378,10 +426,178 @@ public class TranscriptBuilder
             msgVm.PropertyChanged += handler;
         }
 
-        _currentToolGroup!.ToolCalls.Add(toolCall);
-        _currentToolGroupCount++;
+        AddToolItemToCurrentContext(toolCall, msgVm.Message.ParentToolCallId);
+        if (toolParentSubagent is not null && initialStatus == StrataAiToolCallStatus.InProgress && !IsRebuildingTranscript)
+            toolParentSubagent.IsExpanded = true;
         UpdateToolGroupLabel();
     }
+
+    private void ProcessSubagentToolMessage(ChatMessageViewModel msgVm, StrataAiToolCallStatus initialStatus, string toolStableIdSeed, string turnStableId)
+    {
+        // Subagents are standalone turn-level items — close any open tool group first.
+        CloseCurrentToolGroup();
+
+        var toolCallId = msgVm.Message.ToolCallId;
+        if (toolCallId is not null && initialStatus == StrataAiToolCallStatus.InProgress)
+            _toolStartTimes[toolCallId] = Stopwatch.GetTimestamp();
+
+        var displayName = ToolDisplayHelper.GetSubagentDisplayName(msgVm.ToolName ?? "", msgVm.Content, msgVm.Author);
+        var subagent = new SubagentToolCallItem(displayName, initialStatus, $"subagent:{toolStableIdSeed}")
+        {
+            IsExpanded = initialStatus == StrataAiToolCallStatus.InProgress && !IsRebuildingTranscript,
+        };
+        UpdateSubagentFromMessage(subagent, msgVm.Message);
+
+        AppendToCurrentTurn(subagent, turnStableId);
+        if (toolCallId is not null)
+            _subagentsByToolCallId[toolCallId] = subagent;
+
+        if (!IsRebuildingTranscript)
+        {
+            PropertyChangedEventHandler? handler = null;
+            handler = (_, args) =>
+            {
+                if (args.PropertyName == nameof(ChatMessageViewModel.Content))
+                {
+                    UpdateSubagentFromMessage(subagent, msgVm.Message);
+                    UpdateSubagentState(subagent);
+                    return;
+                }
+
+                if (args.PropertyName != nameof(ChatMessageViewModel.ToolStatus))
+                    return;
+
+                subagent.Status = MapToolStatus(msgVm.ToolStatus);
+                if (toolCallId is not null && subagent.Status is not StrataAiToolCallStatus.InProgress
+                    && _toolStartTimes.TryGetValue(toolCallId, out var startTick))
+                {
+                    subagent.DurationMs = Stopwatch.GetElapsedTime(startTick).TotalMilliseconds;
+                    _toolStartTimes.Remove(toolCallId);
+                }
+
+                UpdateSubagentState(subagent);
+
+                if (msgVm.ToolStatus is "Completed" or "Failed")
+                    msgVm.PropertyChanged -= handler;
+            };
+            msgVm.PropertyChanged += handler;
+        }
+
+        UpdateSubagentState(subagent);
+    }
+
+    private void AddToolItemToCurrentContext(ToolCallItemBase item, string? parentToolCallId)
+    {
+        var owningSubagent = FindOwningSubagent(parentToolCallId);
+        if (owningSubagent is not null)
+        {
+            owningSubagent.Activities.Add(item);
+            UpdateSubagentState(owningSubagent);
+            return;
+        }
+
+        _currentToolGroup!.ToolCalls.Add(item);
+        _currentToolGroupCount++;
+    }
+
+    private SubagentToolCallItem? FindOwningSubagent(string? parentToolCallId)
+    {
+        var current = parentToolCallId;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (_subagentsByToolCallId.TryGetValue(current, out var subagent))
+                return subagent;
+
+            if (!_toolParentById.TryGetValue(current, out current))
+                return null;
+        }
+
+        return null;
+    }
+
+    private void UpdateSubagentFromMessage(SubagentToolCallItem subagent, ChatMessage message)
+    {
+        var toolName = message.ToolName ?? "task";
+        subagent.DisplayName = ToolDisplayHelper.GetSubagentDisplayName(toolName, message.Content, message.Author);
+        subagent.TaskDescription = ToolDisplayHelper.GetSubagentTaskDescription(toolName, message.Content);
+        subagent.AgentDescription = ToolDisplayHelper.GetSubagentDescription(message.Content);
+        subagent.ModeLabel = ToolDisplayHelper.GetSubagentModeLabel(message.Content);
+    }
+
+    private void UpdateSubagentState(SubagentToolCallItem subagent)
+    {
+        if (subagent.TodoTotal > 0)
+        {
+            var todoDone = subagent.TodoCompleted + subagent.TodoFailed;
+            subagent.Meta = subagent.TodoFailed > 0
+                ? string.Format(Loc.ToolTodo_MetaWithFailed, subagent.TodoCompleted, subagent.TodoTotal, subagent.TodoFailed)
+                : string.Format(Loc.ToolTodo_Meta, subagent.TodoCompleted, subagent.TodoTotal);
+
+            if (subagent.TodoUpdateCount > 1)
+                subagent.Meta += " · " + string.Format(Loc.ToolTodo_Updates, subagent.TodoUpdateCount);
+
+            subagent.ProgressValue = IsRebuildingTranscript || subagent.TodoTotal == 0
+                ? -1
+                : Math.Clamp((todoDone * 100d) / subagent.TodoTotal, 0d, 100d);
+        }
+        else
+        {
+            CountToolStatuses(subagent.Activities, out var total, out var completed, out var failed);
+            if (total > 0)
+            {
+                var running = Math.Max(0, total - completed - failed);
+                subagent.Meta = failed > 0
+                    ? string.Format(Loc.ToolGroup_MetaFailed, completed, total, failed)
+                    : running > 0
+                        ? string.Format(Loc.ToolGroup_MetaRunning, completed, total, running)
+                        : string.Format(Loc.ToolGroup_MetaDone, completed, total);
+                subagent.ProgressValue = IsRebuildingTranscript
+                    ? -1
+                    : Math.Clamp(((completed + failed) * 100d) / total, 0d, 100d);
+            }
+            else
+            {
+                subagent.Meta = null;
+                subagent.ProgressValue = -1;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(subagent.DurationText) && subagent.Status is not StrataAiToolCallStatus.InProgress)
+            subagent.Meta = string.IsNullOrWhiteSpace(subagent.Meta)
+                ? subagent.DurationText
+                : $"{subagent.Meta} · {subagent.DurationText}";
+
+        if (subagent.Status == StrataAiToolCallStatus.InProgress && !IsRebuildingTranscript)
+            subagent.IsExpanded = true;
+        else if (IsRebuildingTranscript)
+            subagent.IsExpanded = false;
+    }
+
+    private static void CountToolStatuses(IEnumerable<ToolCallItemBase> calls, out int total, out int completed, out int failed)
+    {
+        total = 0;
+        completed = 0;
+        failed = 0;
+
+        foreach (var call in calls)
+        {
+            total++;
+            var status = GetStatus(call);
+            if (status == StrataAiToolCallStatus.Completed)
+                completed++;
+            else if (status == StrataAiToolCallStatus.Failed)
+                failed++;
+        }
+    }
+
+    private static StrataAiToolCallStatus GetStatus(ToolCallItemBase call)
+        => call switch
+        {
+            ToolCallItem toolCall => toolCall.Status,
+            TerminalPreviewItem terminal => terminal.Status,
+            TodoProgressItem todo => todo.Status,
+            _ => StrataAiToolCallStatus.InProgress
+        };
 
     private void ProcessReasoningMessage(ChatMessageViewModel msgVm, bool showReasoning, bool expandWhileStreaming)
     {
@@ -539,7 +755,8 @@ public class TranscriptBuilder
             UpdateToolGroupLabel();
 
             if (_currentToolGroupCount == 1 && !_currentToolGroup.IsActive
-                && _currentToolGroup.ToolCalls.Count == 1 && target is not null)
+                && _currentToolGroup.ToolCalls.Count == 1
+                && target is not null)
             {
                 var idx = target.IndexOf(_currentToolGroup);
                 if (idx >= 0)
@@ -554,6 +771,9 @@ public class TranscriptBuilder
         _todoUpdateCount = 0;
         _currentIntentText = null;
         _terminalPreviewsByToolCallId.Clear();
+        // Keep _toolParentById and _subagentsByToolCallId alive across tool groups
+        // so late-arriving child tools can still be nested under their parent subagent.
+        // These maps are only cleared in ResetState() at the start of Rebuild().
     }
 
     private void UpdateToolGroupLabel()
@@ -594,26 +814,7 @@ public class TranscriptBuilder
         }
 
         var toolCount = isCurrent ? _currentToolGroupCount : group.ToolCalls.Count;
-        var completedCount = 0;
-        var failedCount = 0;
-        foreach (var call in group.ToolCalls)
-        {
-            switch (call)
-            {
-                case ToolCallItem toolCall:
-                    if (toolCall.Status == StrataAiToolCallStatus.Completed) completedCount++;
-                    else if (toolCall.Status == StrataAiToolCallStatus.Failed) failedCount++;
-                    break;
-                case TerminalPreviewItem terminal:
-                    if (terminal.Status == StrataAiToolCallStatus.Completed) completedCount++;
-                    else if (terminal.Status == StrataAiToolCallStatus.Failed) failedCount++;
-                    break;
-                case TodoProgressItem todo:
-                    if (todo.Status == StrataAiToolCallStatus.Completed) completedCount++;
-                    else if (todo.Status == StrataAiToolCallStatus.Failed) failedCount++;
-                    break;
-            }
-        }
+        CountToolStatuses(group.ToolCalls, out _, out var completedCount, out var failedCount);
 
         if (toolCount <= 0)
         {
@@ -714,6 +915,33 @@ public class TranscriptBuilder
         }
     }
 
+    private void UpsertSubagentTodoProgressToolCall(SubagentToolCallItem subagent, List<ToolDisplayHelper.TodoStepSnapshot> steps, string toolStatus)
+    {
+        subagent.TodoTotal = steps.Count;
+        subagent.TodoCompleted = steps.Count(step => string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase));
+        subagent.TodoFailed = steps.Count(step => string.Equals(step.Status, "failed", StringComparison.OrdinalIgnoreCase));
+        subagent.TodoToolStatus = toolStatus;
+        subagent.TodoUpdateCount++;
+
+        var detailsMarkdown = ToolDisplayHelper.BuildTodoDetailsMarkdown(steps);
+        if (subagent.TodoItem is null)
+        {
+            subagent.TodoItem = new TodoProgressItem(
+                $"✅ {Loc.ToolTodo_Title}",
+                MapToolStatus(toolStatus),
+                $"todo:{subagent.StableId}")
+            {
+                InputParameters = detailsMarkdown,
+            };
+            subagent.Activities.Add(subagent.TodoItem);
+        }
+        else
+        {
+            subagent.TodoItem.Status = MapToolStatus(toolStatus);
+            subagent.TodoItem.InputParameters = detailsMarkdown;
+        }
+    }
+
     private void CollapseCompletedTurnBlocks(TranscriptTurn turn, AssistantMessageItem assistantItem)
     {
         var items = turn.Items;
@@ -770,6 +998,10 @@ public class TranscriptBuilder
                             totalToolCalls++;
                             if (terminal.Status == StrataAiToolCallStatus.Failed) failedCount++;
                             break;
+                        case TodoProgressItem todo:
+                            totalToolCalls++;
+                            if (todo.Status == StrataAiToolCallStatus.Failed) failedCount++;
+                            break;
                     }
                 }
             }
@@ -780,6 +1012,15 @@ public class TranscriptBuilder
                     failedCount++;
                 else if (singleTool.Inner is TerminalPreviewItem singleTerminal && singleTerminal.Status == StrataAiToolCallStatus.Failed)
                     failedCount++;
+                else if (singleTool.Inner is TodoProgressItem singleTodo && singleTodo.Status == StrataAiToolCallStatus.Failed)
+                    failedCount++;
+            }
+            else if (block is SubagentToolCallItem subagentItem)
+            {
+                totalToolCalls++;
+                if (subagentItem.Status == StrataAiToolCallStatus.Failed) failedCount++;
+                if (!string.IsNullOrWhiteSpace(subagentItem.Title))
+                    lastIntentLabel = subagentItem.Title;
             }
             else
             {

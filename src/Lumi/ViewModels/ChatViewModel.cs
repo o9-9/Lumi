@@ -268,6 +268,28 @@ public partial class ChatViewModel : ObservableObject
         TranscriptRebuilt?.Invoke();
     }
 
+    private static string BuildSubagentPayloadJson(
+        string? description,
+        string? agentName,
+        string? agentDisplayName,
+        string? agentDescription,
+        string? mode)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("description", description ?? string.Empty);
+            writer.WriteString("agentName", agentName ?? string.Empty);
+            writer.WriteString("agentDisplayName", agentDisplayName ?? string.Empty);
+            writer.WriteString("agentDescription", agentDescription ?? string.Empty);
+            writer.WriteString("mode", mode ?? string.Empty);
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
     internal TranscriptWindowMutation InitializeMountedTranscript(double viewportHeight)
     {
         var mutation = _transcriptWindow.ResetToLatest(viewportHeight, "initial-open");
