@@ -846,7 +846,8 @@ public partial class MainWindow : Window
         {
             if (cts.Token.IsCancellationRequested) break;
             titleBlock.Text = newTitle[..i];
-            await Task.Delay(30, CancellationToken.None);
+            try { await Task.Delay(30, cts.Token); }
+            catch (OperationCanceledException) { break; }
         }
 
         // Ensure final text is complete
