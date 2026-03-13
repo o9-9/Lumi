@@ -32,5 +32,4 @@ internal sealed class ChatRuntimeState
 
     public bool HasUsedBrowser { get; set; }
 
-    public string? PendingTitlePrompt { get; set; }
 }

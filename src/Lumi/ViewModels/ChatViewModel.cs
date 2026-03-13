@@ -935,7 +935,7 @@ public partial class ChatViewModel : ObservableObject
             _dataStore.Data.Chats.Add(chat);
             CurrentChat = chat;
             if (_dataStore.Data.Settings.AutoGenerateTitles)
-                GetOrCreateRuntimeState(chat.Id).PendingTitlePrompt = prompt;
+                _ = GenerateTitleForChatAsync(chat, prompt);
             _ = RefreshCodingProjectState();
             ChatUpdated?.Invoke();
         }
