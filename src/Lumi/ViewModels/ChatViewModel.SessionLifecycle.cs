@@ -288,7 +288,7 @@ public partial class ChatViewModel
                     }
 
                     var displayName = ToolDisplayHelper.FormatToolStatusName(toolStart.Data.ToolName, toolStart.Data.Arguments?.ToString());
-                    runtime.StatusText = string.Format(Loc.Status_Running, displayName);
+                    runtime.StatusText = ToolDisplayHelper.FormatProgressLabel(displayName);
                     var toolMsg = chat.Messages.LastOrDefault(m => m.ToolCallId == startToolCallId);
                     if (toolMsg is null)
                     {
@@ -493,7 +493,7 @@ public partial class ChatViewModel
 
                     var arguments = externalToolRequest.Data.Arguments?.ToString();
                     var displayName = ToolDisplayHelper.FormatToolStatusName(externalToolRequest.Data.ToolName, arguments);
-                    runtime.StatusText = string.Format(Loc.Status_Running, displayName);
+                    runtime.StatusText = ToolDisplayHelper.FormatProgressLabel(displayName);
 
                     var toolMsg = chat.Messages.LastOrDefault(m => m.ToolCallId == externalToolRequest.Data.ToolCallId);
                     if (toolMsg is null)

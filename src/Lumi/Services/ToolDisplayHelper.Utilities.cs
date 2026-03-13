@@ -20,9 +20,12 @@ public static partial class ToolDisplayHelper
         ".py", ".ps1", ".bat", ".cmd", ".sh", ".bash", ".vbs", ".wsf", ".js", ".mjs", ".ts"
     };
 
-    /// <summary>Formats a tool name for the status bar (e.g. "Running: Reading file.txt").</summary>
+    /// <summary>Formats a tool name into a standalone live-status phrase (e.g. "Reading file" or "Running command").</summary>
     public static string FormatToolStatusName(string toolName, string? argsJson = null)
     {
+        if (toolName.StartsWith("agent:", StringComparison.Ordinal))
+            return string.Format(Loc.Tool_RunningAgent, toolName["agent:".Length..]);
+
         var fileName = ExtractShortFileName(argsJson);
         return toolName switch
         {
@@ -67,8 +70,22 @@ public static partial class ToolDisplayHelper
             "ui_click" => Loc.Tool_ClickingControl,
             "ui_type" => Loc.Tool_TypingInControl,
             "ui_read" => Loc.Tool_ReadingControl,
+            "sql" => Loc.Tool_RunningQuery,
+            "task" => string.Format(Loc.Tool_RunningAgent, ExtractJsonField(argsJson, "agent_type") ?? "agent"),
             _ => FormatSnakeCaseToTitle(toolName)
         };
+    }
+
+    /// <summary>Appends an ellipsis to a live status label unless it already has one.</summary>
+    public static string FormatProgressLabel(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+            return label;
+
+        var trimmed = label.TrimEnd();
+        return trimmed.EndsWith("…", StringComparison.Ordinal) || trimmed.EndsWith("...", StringComparison.Ordinal)
+            ? trimmed
+            : $"{trimmed}…";
     }
 
     public static string FormatSnakeCaseToTitle(string name)
