@@ -46,4 +46,37 @@ public class ToolDisplayHelperTests
 
         Assert.Equal("Reading sample.txt…", status);
     }
+
+    [Fact]
+    public void FormatToolStatusName_FetchSkill_UsesSkillName()
+    {
+        var status = ToolDisplayHelper.FormatToolStatusName("fetch_skill", "{\"name\":\"Debug Expert\"}");
+
+        Assert.Equal("Using Debug Expert", status);
+    }
+
+    [Fact]
+    public void GetFriendlyToolDisplay_FetchSkill_UsesSkillNameInLabel()
+    {
+        var (name, info) = ToolDisplayHelper.GetFriendlyToolDisplay("fetch_skill", null, "{\"name\":\"Debug Expert\"}");
+
+        Assert.Equal("Using Debug Expert", name);
+        Assert.Null(info);
+    }
+
+    [Fact]
+    public void FormatToolArgsFriendly_FetchSkill_ShowsSkillField()
+    {
+        var args = ToolDisplayHelper.FormatToolArgsFriendly("fetch_skill", "{\"name\":\"Debug Expert\"}");
+
+        Assert.Equal("**Skill:** Debug Expert", args);
+    }
+
+    [Fact]
+    public void GetToolGlyph_FetchSkill_UsesSkillGlyph()
+    {
+        var glyph = ToolDisplayHelper.GetToolGlyph("fetch_skill");
+
+        Assert.Equal("⚡", glyph);
+    }
 }

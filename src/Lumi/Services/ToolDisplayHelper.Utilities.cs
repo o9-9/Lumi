@@ -57,7 +57,9 @@ public static partial class ToolDisplayHelper
             "delete_memory" => Loc.Tool_Forgetting,
             "recall_memory" => Loc.Tool_Recalling,
             "announce_file" => Loc.Tool_SharingFile,
-            "fetch_skill" => Loc.Tool_FetchingSkill,
+            "fetch_skill" => ExtractJsonField(argsJson, "name") is { Length: > 0 } skillName
+                ? string.Format(Loc.Tool_UsingNamedSkill, skillName)
+                : Loc.Tool_FetchingSkill,
             "ask_question" => Loc.Tool_AskingQuestion,
             "code_review" => Loc.Tool_ReviewingCode,
             "generate_tests" => Loc.Tool_GeneratingTests,

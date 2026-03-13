@@ -27,6 +27,7 @@ public static partial class ToolDisplayHelper
         "web_fetch" or "lumi_fetch" => "📚",
         "ui_inspect" or "ui_find" or "ui_click" or "ui_type" or "ui_read" => "🖥",
         "save_memory" or "update_memory" or "recall_memory" or "delete_memory" => "🧠",
+        "fetch_skill" => "⚡",
         "code_review" => "🔍",
         "generate_tests" => "🧪",
         "explain_code" => "📖",
@@ -136,7 +137,12 @@ public static partial class ToolDisplayHelper
             case "announce_file":
                 return (Loc.Tool_SharingFile, ExtractShortFileName(argsJson));
             case "fetch_skill":
-                return (Loc.Tool_FetchingSkill, ExtractJsonField(argsJson, "name"));
+            {
+                var skillName = ExtractJsonField(argsJson, "name");
+                return !string.IsNullOrWhiteSpace(skillName)
+                    ? (string.Format(Loc.Tool_UsingNamedSkill, skillName), null)
+                    : (Loc.Tool_FetchingSkill, null);
+            }
             case "ask_question":
                 return (Loc.Tool_AskingQuestion, null);
             case "ui_inspect":
@@ -253,6 +259,8 @@ public static partial class ToolDisplayHelper
                     var truncated = prompt.Length > 200 ? prompt[..197] + "..." : prompt;
                     return $"**Prompt:** {truncated}";
                 }
+                case "fetch_skill":
+                    return GetString(root, "name") is { } skillName ? $"**Skill:** {skillName}" : null;
                 case "report_intent":
                     return GetString(root, "intent") is { } intent ? $"Intent: {intent}" : null;
                 case "read_powershell":

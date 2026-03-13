@@ -170,6 +170,8 @@
   "Tool_Recalling": "Recalling",
   "Tool_SharingFile": "Sharing file",
   "Tool_FetchingSkill": "Loading skill",
+  "Tool_UsingNamedSkill": "Using {0}",
+  "Chat_UsedSkillLabel": "Used skill",
   "Tool_AskingQuestion": "Asking question",
   "Tool_BrowsingFolder": "Browsing folder",
   "Tool_ReadingDocument": "Reading document",

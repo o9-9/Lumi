@@ -359,7 +359,12 @@ public partial class ChatViewModel : ObservableObject
     private List<SkillReference> BuildSkillReferences(IReadOnlyCollection<Guid> skillIds)
     {
         return ResolveSkillsByIds(skillIds)
-            .Select(static s => new SkillReference { Name = s.Name, Glyph = s.IconGlyph })
+            .Select(static s => new SkillReference
+            {
+                Name = s.Name,
+                Glyph = s.IconGlyph,
+                Description = s.Description
+            })
             .ToList();
     }
 

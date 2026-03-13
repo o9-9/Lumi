@@ -194,7 +194,8 @@ public class TranscriptBuilder
                 PendingFetchedSkillRefs.Add(new SkillReference
                 {
                     Name = skillName,
-                    Glyph = skill?.IconGlyph ?? "\u26A1"
+                    Glyph = skill?.IconGlyph ?? "\u26A1",
+                    Description = skill?.Description ?? string.Empty
                 });
             }
             return;

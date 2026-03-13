@@ -729,7 +729,8 @@ public partial class ChatViewModel
                                     _transcriptBuilder.PendingFetchedSkillRefs.Add(new SkillReference
                                     {
                                         Name = skillName,
-                                        Glyph = skill?.IconGlyph ?? "\u26A1"
+                                        Glyph = skill?.IconGlyph ?? "\u26A1",
+                                        Description = skill?.Description ?? string.Empty
                                     });
                                 }
                             }
@@ -1307,7 +1308,8 @@ public partial class ChatViewModel
                         _transcriptBuilder.PendingFetchedSkillRefs.Add(new SkillReference
                         {
                             Name = skillInvoked.Data.Name,
-                            Glyph = skill?.IconGlyph ?? "\u26A1"
+                            Glyph = skill?.IconGlyph ?? "\u26A1",
+                            Description = skill?.Description ?? string.Empty
                         });
                     }
                     });

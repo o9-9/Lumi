@@ -170,6 +170,8 @@
   "Tool_Recalling": "שליפה מהזיכרון",
   "Tool_SharingFile": "שיתוף קובץ",
   "Tool_FetchingSkill": "טעינת מיומנות",
+  "Tool_UsingNamedSkill": "שימוש במיומנות {0}",
+  "Chat_UsedSkillLabel": "מיומנות בשימוש",
   "Tool_AskingQuestion": "שואל שאלה",
   "Tool_BrowsingFolder": "עיון בתיקייה",
   "Tool_ReadingDocument": "קריאת מסמך",

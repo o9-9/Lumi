@@ -29,6 +29,7 @@ public class SkillReference
 {
     public string Name { get; set; } = "";
     public string Glyph { get; set; } = "\u26A1";
+    public string Description { get; set; } = "";
 }
 
 public class SearchSource
