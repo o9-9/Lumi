@@ -489,15 +489,7 @@
 
     <!-- ── Subagent card (standalone turn-level item) ── -->
     <DataTemplate DataType="vm:SubagentToolCallItem">
-      <Grid ColumnDefinitions="Auto,*">
-        <!-- Left accent bar — subtle sub-agent indicator -->
-        <Border Width="2.5" CornerRadius="1.5"
-                Background="{DynamicResource Brush.AccentDefault}"
-                Opacity="0.55"
-                Margin="0,4,8,4" />
-
-        <sc:StrataThink Grid.Column="1"
-                        Label="{Binding Title}"
+        <sc:StrataThink Label="{Binding Title}"
                         Meta="{Binding Meta}"
                         IsExpanded="{Binding IsExpanded}"
                         IsActive="{Binding IsActive}"
@@ -552,8 +544,7 @@
             </ItemsControl>
           </StackPanel>
         </sc:StrataThink.Content>
-          </sc:StrataThink>
-      </Grid>
+        </sc:StrataThink>
     </DataTemplate>
 
     <!-- ── Regular tool call (inside tool group) ────── -->

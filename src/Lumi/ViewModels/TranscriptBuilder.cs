@@ -19,6 +19,7 @@ public class TranscriptBuilder
     private readonly Action<FileChangeItem> _showDiffAction;
     private readonly Action<string, string> _submitQuestionAnswerAction;
     private readonly Func<ChatMessage, bool, Task> _resendFromMessageAction;
+    private readonly Func<string?> _getSelectedModel;
 
     private ToolGroupItem? _currentToolGroup;
     private int _currentToolGroupCount;
@@ -59,12 +60,14 @@ public class TranscriptBuilder
         DataStore dataStore,
         Action<FileChangeItem> showDiffAction,
         Action<string, string> submitQuestionAnswerAction,
-        Func<ChatMessage, bool, Task> resendFromMessageAction)
+        Func<ChatMessage, bool, Task> resendFromMessageAction,
+        Func<string?> getSelectedModel)
     {
         _dataStore = dataStore;
         _showDiffAction = showDiffAction;
         _submitQuestionAnswerAction = submitQuestionAnswerAction;
         _resendFromMessageAction = resendFromMessageAction;
+        _getSelectedModel = getSelectedModel;
     }
 
     public ObservableCollection<TranscriptTurn> Rebuild(IEnumerable<ChatMessageViewModel> messages)
@@ -560,8 +563,12 @@ public class TranscriptBuilder
         subagent.TaskDescription = ToolDisplayHelper.GetSubagentTaskDescription(toolName, message.Content);
         subagent.AgentDescription = ToolDisplayHelper.GetSubagentDescription(message.Content);
         subagent.ModeLabel = ToolDisplayHelper.GetSubagentModeLabel(message.Content);
-        subagent.ModelDisplayName = ToolDisplayHelper.FormatModelDisplayName(
-            ToolDisplayHelper.GetSubagentModelName(message.Content));
+
+        var modelId = ToolDisplayHelper.GetSubagentModelName(message.Content)
+            ?? message.Model
+            ?? _getSelectedModel();
+        subagent.ModelDisplayName = ChatViewModel.FormatModelDisplay(modelId);
+
         subagent.TranscriptText = ToolDisplayHelper.ExtractJsonField(message.Content, "transcript");
         subagent.ReasoningText = ToolDisplayHelper.ExtractJsonField(message.Content, "reasoning");
     }

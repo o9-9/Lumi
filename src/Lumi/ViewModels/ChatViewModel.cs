@@ -197,7 +197,8 @@ public partial class ChatViewModel : ObservableObject
             dataStore,
             showDiffAction: item => DiffShowRequested?.Invoke(item),
             submitQuestionAnswerAction: SubmitQuestionAnswer,
-            resendFromMessageAction: ResendFromMessageAsync);
+            resendFromMessageAction: ResendFromMessageAsync,
+            getSelectedModel: () => SelectedModel);
         _transcriptBuilder.SetLiveTarget(_transcriptTurns);
         _transcriptWindow.BindTranscript(_transcriptTurns, "ctor");
         _transcriptWindow.PropertyChanged += OnTranscriptWindowPropertyChanged;
