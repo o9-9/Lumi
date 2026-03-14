@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private Panel? _renameOverlay;
     private TextBox? _renameTextBox;
     private StackPanel? _projectFilterBar;
+    private readonly List<(Project Project, PropertyChangedEventHandler Handler)> _projectFilterHandlers = [];
     private ComboBox? _onboardingSexCombo;
     private ComboBox? _onboardingLanguageCombo;
     private TextBox? _chatSearchBox;
@@ -65,6 +66,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _browserAnimCts;
     private CancellationTokenSource? _shellAnimCts;
     private int _currentShellIndex = -1;
+    private MainViewModel? _wiredVm;
 
     public MainWindow()
     {
@@ -364,8 +366,9 @@ public partial class MainWindow : Window
     {
         base.OnDataContextChanged(e);
 
-        if (DataContext is MainViewModel vm)
+        if (DataContext is MainViewModel vm && !ReferenceEquals(vm, _wiredVm))
         {
+            _wiredVm = vm;
             UpdateOnboarding(vm.IsOnboarded);
             ShowPage(vm.SelectedNavIndex);
             UpdateNavHighlight(vm.SelectedNavIndex);
@@ -1005,6 +1008,12 @@ public partial class MainWindow : Window
     private void RebuildProjectFilterBar(MainViewModel vm)
     {
         if (_projectFilterBar is null) return;
+
+        // Unsubscribe all previous project PropertyChanged handlers
+        foreach (var (project, handler) in _projectFilterHandlers)
+            project.PropertyChanged -= handler;
+        _projectFilterHandlers.Clear();
+
         _projectFilterBar.Children.Clear();
 
         var isAll = !vm.SelectedProjectFilter.HasValue;
@@ -1047,6 +1056,7 @@ public partial class MainWindow : Window
                     Dispatcher.UIThread.Post(() => capturedDot.IsVisible = capturedProject.IsRunning && !capturedIsActive);
             };
             project.PropertyChanged += handler;
+            _projectFilterHandlers.Add((project, handler));
 
             var nameText = new TextBlock { Text = project.Name, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
             var panel = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };

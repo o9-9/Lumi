@@ -162,4 +162,14 @@ public sealed class TranscriptTextContent : ContentControl
             || MarkdownTablePattern.IsMatch(text)
             || MarkdownRulePattern.IsMatch(text);
     }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        // Clear markdown content so StrataMarkdown can release its caches.
+        // The StrataMarkdown instance itself is reused if re-attached.
+        _markdown.Markdown = null;
+        _textBlock.Text = null;
+        Content = null;
+        base.OnDetachedFromVisualTree(e);
+    }
 }

@@ -33,6 +33,7 @@ public class TranscriptBuilder
     private readonly Dictionary<string, string?> _toolParentById = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SubagentToolCallItem> _subagentsByToolCallId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _toolStartTimes = [];
+    private readonly List<(ChatMessageViewModel Vm, PropertyChangedEventHandler Handler)> _pendingToolHandlers = [];
     public List<FileAttachmentItem> PendingToolFileChips { get; } = [];
     public List<(string FilePath, string ToolName, string? OldText, string? NewText)> PendingFileEdits { get; } = [];
     private IList<TranscriptTurn>? _rebuildTarget;
@@ -91,6 +92,12 @@ public class TranscriptBuilder
 
     public void ResetState()
     {
+        // Unsubscribe all pending PropertyChanged handlers to prevent leaking
+        // TranscriptItem references via closures on ChatMessageViewModel events.
+        foreach (var (vm, handler) in _pendingToolHandlers)
+            vm.PropertyChanged -= handler;
+        _pendingToolHandlers.Clear();
+
         _currentToolGroup = null;
         _currentToolGroupCount = 0;
         _currentTodoToolCall = null;
@@ -281,10 +288,14 @@ public class TranscriptBuilder
                         }
 
                         if (msgVm.ToolStatus is "Completed" or "Failed")
+                        {
                             msgVm.PropertyChanged -= handler;
+                            RemovePendingHandler(msgVm, handler);
+                        }
                     }
                 };
                 msgVm.PropertyChanged += handler;
+                _pendingToolHandlers.Add((msgVm, handler));
             }
 
             return;
@@ -348,9 +359,13 @@ public class TranscriptBuilder
                     UpdateToolGroupState(capturedTermGroup);
 
                     if (msgVm.ToolStatus is "Completed" or "Failed")
+                    {
                         msgVm.PropertyChanged -= handler;
+                        RemovePendingHandler(msgVm, handler);
+                    }
                 };
                 msgVm.PropertyChanged += handler;
+                _pendingToolHandlers.Add((msgVm, handler));
             }
 
             AddToolItemToCurrentContext(termPreview, msgVm.Message.ParentToolCallId);
@@ -422,9 +437,13 @@ public class TranscriptBuilder
                 UpdateToolGroupState(capturedToolGroup);
 
                 if (msgVm.ToolStatus is "Completed" or "Failed")
+                {
                     msgVm.PropertyChanged -= handler;
+                    RemovePendingHandler(msgVm, handler);
+                }
             };
             msgVm.PropertyChanged += handler;
+            _pendingToolHandlers.Add((msgVm, handler));
         }
 
         AddToolItemToCurrentContext(toolCall, msgVm.Message.ParentToolCallId);
@@ -479,9 +498,13 @@ public class TranscriptBuilder
                 UpdateSubagentState(subagent);
 
                 if (msgVm.ToolStatus is "Completed" or "Failed")
+                {
                     msgVm.PropertyChanged -= handler;
+                    RemovePendingHandler(msgVm, handler);
+                }
             };
             msgVm.PropertyChanged += handler;
+            _pendingToolHandlers.Add((msgVm, handler));
         }
 
         UpdateSubagentState(subagent);
@@ -673,9 +696,11 @@ public class TranscriptBuilder
                     CollapseCompletedTurnBlocks(capturedTurn, capturedItem);
                     FlushPendingPlanCard();
                     msgVm.PropertyChanged -= handler;
+                    RemovePendingHandler(msgVm, handler);
                 }
             };
             msgVm.PropertyChanged += handler;
+            _pendingToolHandlers.Add((msgVm, handler));
         }
     }
 
@@ -1254,4 +1279,17 @@ public class TranscriptBuilder
     }
 
     private static string TurnStableIdFor(string seed) => $"turn:{seed}";
+
+    private void RemovePendingHandler(ChatMessageViewModel vm, PropertyChangedEventHandler? handler)
+    {
+        for (var i = _pendingToolHandlers.Count - 1; i >= 0; i--)
+        {
+            var (v, h) = _pendingToolHandlers[i];
+            if (ReferenceEquals(v, vm) && ReferenceEquals(h, handler))
+            {
+                _pendingToolHandlers.RemoveAt(i);
+                return;
+            }
+        }
+    }
 }
