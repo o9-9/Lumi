@@ -68,7 +68,7 @@ public partial class ChatViewModel
         tools.AddRange(BuildMemoryTools());
         tools.Add(BuildAnnounceFileTool());
         tools.Add(BuildFetchSkillTool());
-        tools.Add(BuildAskQuestionTool());
+        tools.Add(BuildAskQuestionTool(chatId));
         tools.AddRange(BuildWebTools());
         if (ActiveAgentAllows(BrowserToolNames))
             tools.AddRange(BuildBrowserTools(chatId));
@@ -498,7 +498,7 @@ public partial class ChatViewModel
             "Retrieve the full content of a skill by name. Use this when the user asks to use a skill, or when their request closely matches a skill's description. The skill content contains detailed instructions on how to perform the task.");
     }
 
-    private AIFunction BuildAskQuestionTool()
+    private AIFunction BuildAskQuestionTool(Guid chatId)
     {
         return AIFunctionFactory.Create(
             async ([Description("The question to ask the user")] string question,
@@ -512,7 +512,6 @@ public partial class ChatViewModel
                 var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _pendingQuestions[questionId] = tcs;
 
-                var chatId = CurrentChat?.Id;
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (CurrentChat?.Id != chatId) return;
@@ -524,7 +523,7 @@ public partial class ChatViewModel
                 // Store questionId on the tool message so it can be recovered during rebuild
                 Dispatcher.UIThread.Post(() =>
                 {
-                    var chat = CurrentChat;
+                    var chat = _dataStore.Data.Chats.Find(c => c.Id == chatId);
                     if (chat is not null)
                     {
                         var toolMsg = chat.Messages.LastOrDefault(m =>
@@ -542,7 +541,7 @@ public partial class ChatViewModel
                     var resultText = $"User answered: {answer}";
                     Dispatcher.UIThread.Post(() =>
                     {
-                        var chat = CurrentChat;
+                        var chat = _dataStore.Data.Chats.Find(c => c.Id == chatId);
                         if (chat is not null)
                         {
                             var toolMsg = chat.Messages.LastOrDefault(m =>
