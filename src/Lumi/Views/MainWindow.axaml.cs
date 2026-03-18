@@ -85,12 +85,12 @@ public partial class MainWindow : Window
             if (e.Property == WindowStateProperty)
                 OnWindowStateChanged();
             else if (e.Property == TopLevel.ActualTransparencyLevelProperty)
-                UpdateAcrylicFallbackOpacity();
+                UpdateTransparencyFallbackOpacity();
         };
 
         Opened += (_, _) =>
         {
-            UpdateAcrylicFallbackOpacity();
+            UpdateTransparencyFallbackOpacity();
             ApplyWindowContentPaddingForState();
         };
     }
@@ -1153,13 +1153,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private void UpdateAcrylicFallbackOpacity()
+    private void UpdateTransparencyFallbackOpacity()
     {
         if (_acrylicFallback is null) return;
 
-        _acrylicFallback.Opacity = ActualTransparencyLevel == WindowTransparencyLevel.None
-            ? 0.88
-            : 0.8;
+        var opacity = 0.8;
+        if (ActualTransparencyLevel == WindowTransparencyLevel.None)
+            opacity = 0.88;
+        else if (ActualTransparencyLevel == WindowTransparencyLevel.Mica)
+            opacity = 0.62;
+
+        _acrylicFallback.Opacity = opacity;
     }
 
     /// <summary>Whether the browser panel is currently visible.</summary>
