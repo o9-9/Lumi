@@ -24,6 +24,26 @@ public sealed class BrowserService : IAsyncDisposable
     private static CoreWebView2Environment? _sharedEnvironment;
     private static readonly SemaphoreSlim _sharedEnvLock = new(1, 1);
 
+    /// <summary>
+    /// CSS selector for interactive elements. Used by LookAsync, ClickByNumber, TypeByNumber, etc.
+    /// Expanded to include ARIA roles for custom UI components (radio buttons, checkboxes, comboboxes,
+    /// calendar grid cells, switches) that frameworks like MUI/React use instead of native elements.
+    /// </summary>
+    private const string InteractiveElementSelector =
+        "a[href],button,input,select,textarea," +
+        "[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"]," +
+        "[role=\"radio\"],[role=\"checkbox\"],[role=\"switch\"],[role=\"combobox\"]," +
+        "[role=\"option\"],[role=\"gridcell\"],[role=\"spinbutton\"],[role=\"slider\"]," +
+        "[onclick],[tabindex],[contenteditable],[data-tooltip]";
+
+    /// <summary>The same selector escaped for embedding in JS single-quoted strings.</summary>
+    private const string InteractiveElementSelectorJs =
+        "a[href],button,input,select,textarea," +
+        "[role=\\\"button\\\"],[role=\\\"link\\\"],[role=\\\"tab\\\"],[role=\\\"menuitem\\\"]," +
+        "[role=\\\"radio\\\"],[role=\\\"checkbox\\\"],[role=\\\"switch\\\"],[role=\\\"combobox\\\"]," +
+        "[role=\\\"option\\\"],[role=\\\"gridcell\\\"],[role=\\\"spinbutton\\\"],[role=\\\"slider\\\"]," +
+        "[onclick],[tabindex],[contenteditable],[data-tooltip]";
+
     private CoreWebView2Environment? _environment;
     private CoreWebView2Controller? _controller;
     private CoreWebView2? _webView;
@@ -562,15 +582,17 @@ public sealed class BrowserService : IAsyncDisposable
         await _actionLock.WaitAsync();
         try
         {
-            // Wrap the user script in try/catch so errors are returned as text instead of null.
-            // Also wrap in an async IIFE so Promise-returning scripts work correctly.
+            // Wrap the user script in a synchronous try/catch so errors are returned as text instead of null.
+            // NOTE: We intentionally do NOT use async/await here because WebView2's ExecuteScriptAsync
+            // may not auto-await Promises, which would cause all results to come back as empty "{}".
             var wrappedScript =
-                "(async function(){try{" +
+                "(function(){try{" +
                 "var __result__=(function(){" + javascript + "})();" +
-                "if(__result__ instanceof Promise)__result__=await __result__;" +
                 "if(__result__===undefined)return '(undefined)';" +
                 "if(__result__===null)return '(null)';" +
-                "if(typeof __result__==='object')try{return JSON.stringify(__result__,null,2)}catch(e){return String(__result__);}" +
+                "if(typeof __result__==='object'){" +
+                "if(typeof __result__.then==='function')return '(Promise returned — use .then() or callback pattern instead of await)';" +
+                "try{return JSON.stringify(__result__,null,2)}catch(e){return String(__result__);}}" +
                 "return String(__result__);" +
                 "}catch(e){return 'JS Error: '+e.message+(e.stack?'\\n'+e.stack.split('\\n').slice(0,3).join('\\n'):'');}})()";
 
@@ -638,7 +660,7 @@ public sealed class BrowserService : IAsyncDisposable
                 "  var el=null;" +
                 "  if(isNum){" +
                 "    var vis=function(el){if(!el)return false;var r=el.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var cs=getComputedStyle(el);return cs.display!=='none'&&cs.visibility!=='hidden'&&cs.opacity!=='0';};" +
-                "    var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[onclick],[tabindex],[data-tooltip]';" +
+                "    var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[role=\"radio\"],[role=\"checkbox\"],[role=\"switch\"],[role=\"combobox\"],[role=\"option\"],[role=\"gridcell\"],[role=\"spinbutton\"],[role=\"slider\"],[onclick],[tabindex],[contenteditable],[data-tooltip]';" +
                 "    var dialogs=Array.from(document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]')).filter(vis);" +
                 "    var roots=dialogs.length>0?dialogs.reverse().concat([document]):[document];" +
                 "    var all=[];var seen=new Set();" +
@@ -797,7 +819,7 @@ public sealed class BrowserService : IAsyncDisposable
                 " var filter='" + escapedFilter + "'.toLowerCase();" +
                 " var norm=function(s){return (s||'').replace(/\\s+/g,' ').trim();};" +
                 " var vis=function(el){if(!el)return false;var r=el.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var cs=getComputedStyle(el);return cs.display!=='none'&&cs.visibility!=='hidden'&&cs.opacity!=='0';};" +
-                " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[onclick],[tabindex],[data-tooltip]';" +
+                " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[role=\"radio\"],[role=\"checkbox\"],[role=\"switch\"],[role=\"combobox\"],[role=\"option\"],[role=\"gridcell\"],[role=\"spinbutton\"],[role=\"slider\"],[onclick],[tabindex],[contenteditable],[data-tooltip]';" +
                 " var dialogs=Array.from(document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]')).filter(vis);" +
                 " var roots=dialogs.length>0?dialogs.reverse().concat([document]):[document];" +
                 " var items=[];var seen=new Set();" +
@@ -850,7 +872,7 @@ public sealed class BrowserService : IAsyncDisposable
                 " const wantsDownload=/download|save|export|attachment|file|xlsx|csv|\\u05d4\\u05d5\\u05e8\\u05d3|\\u05e7\\u05d5\\u05d1\\u05e5/.test(queryLower);" +
                 " const norm=(s)=> (s||'').replace(/\\s+/g,' ').trim();" +
                 " const vis=(el)=>{ if(!el) return false; const r=el.getBoundingClientRect(); if(r.width<=0||r.height<=0) return false; const cs=getComputedStyle(el); return cs.display!=='none'&&cs.visibility!=='hidden'&&cs.opacity!=='0'; };" +
-                " const sel='a[href],button,input,select,textarea,[role=\\\"button\\\"],[role=\\\"link\\\"],[role=\\\"tab\\\"],[role=\\\"menuitem\\\"],[onclick],[tabindex],[data-tooltip]';" +
+                " const sel='" + InteractiveElementSelectorJs + "';" +
                 " const dialogs=[...document.querySelectorAll('[role=\\\"dialog\\\"],[aria-modal=\\\"true\\\"]')].filter(vis);" +
                 " const roots=(preferDialog && dialogs.length>0) ? [...dialogs.reverse(),document] : [document];" +
                 " const all=[]; const seen=new Set();" +
@@ -1001,7 +1023,7 @@ public sealed class BrowserService : IAsyncDisposable
                 "(function(){" +
                 " var idx=" + Math.Max(1, index) + ";" +
                 " var vis=function(el){if(!el)return false;var r=el.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var cs=getComputedStyle(el);return cs.display!=='none'&&cs.visibility!=='hidden'&&cs.opacity!=='0';};" +
-                " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[onclick],[tabindex],[data-tooltip]';" +
+                " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[role=\"radio\"],[role=\"checkbox\"],[role=\"switch\"],[role=\"combobox\"],[role=\"option\"],[role=\"gridcell\"],[role=\"spinbutton\"],[role=\"slider\"],[onclick],[tabindex],[contenteditable],[data-tooltip]';" +
                 " var dialogs=Array.from(document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]')).filter(vis);" +
                 " var roots=dialogs.length>0?dialogs.reverse().concat([document]):[document];" +
                 " var all=[];var seen=new Set();" +
@@ -1038,7 +1060,7 @@ public sealed class BrowserService : IAsyncDisposable
                 "(function(){" +
                 " var idx=" + Math.Max(1, index) + ";" +
                 " var vis=function(el){if(!el)return false;var r=el.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var cs=getComputedStyle(el);return cs.display!=='none'&&cs.visibility!=='hidden'&&cs.opacity!=='0';};" +
-                " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[onclick],[tabindex],[data-tooltip]';" +
+                " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[role=\"radio\"],[role=\"checkbox\"],[role=\"switch\"],[role=\"combobox\"],[role=\"option\"],[role=\"gridcell\"],[role=\"spinbutton\"],[role=\"slider\"],[onclick],[tabindex],[contenteditable],[data-tooltip]';" +
                 " var dialogs=Array.from(document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]')).filter(vis);" +
                 " var roots=dialogs.length>0?dialogs.reverse().concat([document]):[document];" +
                 " var all=[];var seen=new Set();" +
@@ -1077,7 +1099,7 @@ public sealed class BrowserService : IAsyncDisposable
                     "(function(){" +
                     " var idx=" + Math.Max(1, idx) + ";" +
                     " var vis=function(el){if(!el)return false;var r=el.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var cs=getComputedStyle(el);return cs.display!=='none'&&cs.visibility!=='hidden'&&cs.opacity!=='0';};" +
-                    " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[onclick],[tabindex],[data-tooltip]';" +
+                    " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[role=\"radio\"],[role=\"checkbox\"],[role=\"switch\"],[role=\"combobox\"],[role=\"option\"],[role=\"gridcell\"],[role=\"spinbutton\"],[role=\"slider\"],[onclick],[tabindex],[contenteditable],[data-tooltip]';" +
                     " var dialogs=Array.from(document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]')).filter(vis);" +
                     " var roots=dialogs.length>0?dialogs.reverse().concat([document]):[document];" +
                     " var all=[];var seen=new Set();" +
@@ -1131,7 +1153,7 @@ public sealed class BrowserService : IAsyncDisposable
                 "(function(){" +
                 " try { var fields = JSON.parse('" + escapedJson + "'); } catch(e) { return 'Error: invalid JSON — ' + e.message; }" +
                 " var vis=function(el){if(!el)return false;var r=el.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var cs=getComputedStyle(el);return cs.display!=='none'&&cs.visibility!=='hidden'&&cs.opacity!=='0';};" +
-                " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[onclick],[tabindex],[data-tooltip]';" +
+                " var sel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[role=\"radio\"],[role=\"checkbox\"],[role=\"switch\"],[role=\"combobox\"],[role=\"option\"],[role=\"gridcell\"],[role=\"spinbutton\"],[role=\"slider\"],[onclick],[tabindex],[contenteditable],[data-tooltip]';" +
                 " var dialogs=Array.from(document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]')).filter(vis);" +
                 " var roots=dialogs.length>0?dialogs.reverse().concat([document]):[document];" +
                 " var all=[];var seen=new Set();" +
@@ -1243,7 +1265,7 @@ public sealed class BrowserService : IAsyncDisposable
                 // Find all visible form fields
                 " var inputs=document.querySelectorAll('input,select,textarea');" +
                 " var fields=[];" +
-                " var elSel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[onclick],[tabindex],[data-tooltip]';" +
+                " var elSel='a[href],button,input,select,textarea,[role=\"button\"],[role=\"link\"],[role=\"tab\"],[role=\"menuitem\"],[role=\"radio\"],[role=\"checkbox\"],[role=\"switch\"],[role=\"combobox\"],[role=\"option\"],[role=\"gridcell\"],[role=\"spinbutton\"],[role=\"slider\"],[onclick],[tabindex],[contenteditable],[data-tooltip]';" +
                 " var dialogs=Array.from(document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]')).filter(vis);" +
                 " var roots=dialogs.length>0?dialogs.reverse().concat([document]):[document];" +
                 " var all=[];var seen=new Set();" +
@@ -1365,7 +1387,7 @@ public sealed class BrowserService : IAsyncDisposable
                 " const limit=" + jsLimit + ";" +
                 " const norm=(s)=> (s||'').replace(/\\s+/g,' ').trim();" +
                 " const vis=(el)=>{ if(!el) return false; const r=el.getBoundingClientRect(); if(r.width<=0||r.height<=0) return false; const cs=getComputedStyle(el); return cs.display!=='none'&&cs.visibility!=='hidden'&&cs.opacity!=='0'; };" +
-                " const sel='a[href],button,input,select,textarea,[role=\\\"button\\\"],[role=\\\"link\\\"],[role=\\\"tab\\\"],[role=\\\"menuitem\\\"],[onclick],[tabindex],[data-tooltip]';" +
+                " const sel='" + InteractiveElementSelectorJs + "';" +
                 " const dialogs=[...document.querySelectorAll('[role=\\\"dialog\\\"],[aria-modal=\\\"true\\\"]')].filter(vis);" +
                 " const roots=dialogs.length>0 ? [...dialogs.reverse(), document] : [document];" +
                 " const all=[]; const seen=new Set();" +
