@@ -296,6 +296,11 @@ public partial class ChatView : UserControl
         chatShell.ScrollToEnd();
         viewModel.UpdateTranscriptPinnedState(chatShell.IsPinnedToBottom, chatShell.CurrentDistanceFromBottom);
         FocusComposer();
+
+        // After ScrollToEnd settles, adjust if the user message is barely hidden.
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+        AdjustScrollAfterTurnCompleted();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -305,6 +310,37 @@ public partial class ChatView : UserControl
 
         if (e.PropertyName == nameof(ChatViewModel.IsWorktreeMode))
             UpdateWorktreeToggleHighlight();
+
+        // After a turn completes, nudge the scroll position so the user's
+        // message isn't hidden just above the viewport.
+        if (e.PropertyName == nameof(ChatViewModel.IsBusy) && _subscribedVm is { IsBusy: false })
+            Dispatcher.UIThread.Post(AdjustScrollAfterTurnCompleted, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// When a short exchange (user message + few tool calls + response) barely
+    /// exceeds the viewport, the streaming auto-scroll pushes the user message
+    /// just above the visible area. Detect this and scroll back to show the
+    /// full exchange.
+    /// </summary>
+    private void AdjustScrollAfterTurnCompleted()
+    {
+        if (_chatShell is null || _transcriptScrollViewer is null)
+            return;
+
+        var offset = _transcriptScrollViewer.Offset.Y;
+        if (offset <= 0)
+            return;
+
+        var extent = _transcriptScrollViewer.Extent.Height;
+        var viewport = _transcriptScrollViewer.Viewport.Height;
+        var overflow = extent - viewport;
+
+        // If the content barely overflows the viewport (by less than the
+        // typical height of a user message bubble), scroll to the top so
+        // the entire conversation — including the user's prompt — is visible.
+        if (overflow > 0 && overflow <= 200)
+            _chatShell.ScrollToVerticalOffset(0);
     }
 
     private void OnTranscriptScrollChanged(object? sender, ScrollChangedEventArgs e)
