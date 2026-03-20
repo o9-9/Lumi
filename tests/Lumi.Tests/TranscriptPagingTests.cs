@@ -294,6 +294,164 @@ public sealed class TranscriptPagingTests
         Assert.DoesNotContain("turn:0016", mountedIds);
     }
 
+    [Fact]
+    public void StreamingWhilePinnedAtTail_TrimsHeadToKeepLatestVisible()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 1,
+            MaxMountedPages = 3,
+        });
+        var source = CreateTurns(8, measuredHeightFactory: _ => 100);
+
+        controller.BindTranscript(source, "tail-track");
+        controller.ResetToLatest(200, "tail-track");
+        controller.UpdatePinnedState(true, 0, "tail-track");
+
+        // Verify mounted is tracking the tail
+        Assert.Equal("turn:0007", controller.MountedTurns[^1].StableId);
+
+        // Add enough turns to push beyond MaxMountedPages
+        for (var i = 8; i < 14; i++)
+            source.Add(CreateTurn(i, measuredHeight: 100));
+
+        var snapshot = controller.CaptureSnapshot();
+        Assert.True(snapshot.MountedPageCount <= 3, "Mounted pages should not exceed MaxMountedPages");
+        Assert.Equal("turn:0013", controller.MountedTurns[^1].StableId);
+        Assert.Contains(controller.MountedTurns, turn => turn.StableId == "turn:0013");
+    }
+
+    [Fact]
+    public void StreamingWhilePinnedAtTail_DoesNotDropNewContent()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 2,
+            MaxMountedPages = 3,
+            InitialViewportFillMultiplier = 10, // Force mounting all pages
+        });
+        var source = CreateTurns(6, measuredHeightFactory: _ => 100);
+
+        controller.BindTranscript(source, "no-drop");
+        controller.ResetToLatest(200, "no-drop");
+        controller.UpdatePinnedState(true, 0, "no-drop");
+
+        // MountedPages should be at max (3 pages with 2 turns each = 6 turns)
+        Assert.Equal(3, controller.CaptureSnapshot().MountedPageCount);
+
+        // Add two more turns creating a new page
+        source.Add(CreateTurn(6, measuredHeight: 100));
+        source.Add(CreateTurn(7, measuredHeight: 100));
+
+        // New turns must be visible - head should be trimmed, not tail
+        var mountedIds = controller.MountedTurns.Select(static turn => turn.StableId).ToArray();
+        Assert.Contains("turn:0007", mountedIds);
+        Assert.Contains("turn:0006", mountedIds);
+        Assert.True(controller.CaptureSnapshot().MountedPageCount <= 3);
+    }
+
+    [Fact]
+    public void EnsureLatestMounted_BringsLatestIntoView()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 1,
+            MaxMountedPages = 3,
+            PrependTriggerPixels = 160,
+        });
+        var source = CreateTurns(12, measuredHeightFactory: _ => 120);
+
+        controller.BindTranscript(source, "ensure-latest");
+        controller.ResetToLatest(200, "ensure-latest");
+        controller.UpdatePinnedState(false, 260, "ensure-latest");
+
+        // Simulate scrolling up: prepend head pages
+        for (var i = 0; i < 4; i++)
+        {
+            controller.UpdateViewport(
+                new TranscriptViewportState(0, 200, 1400 + (i * 120), false, 260),
+                $"scroll-up-{i}");
+        }
+
+        // Verify the latest turn is NOT mounted (user scrolled away)
+        var mountedIds = controller.MountedTurns.Select(static turn => turn.StableId).ToArray();
+        Assert.DoesNotContain("turn:0011", mountedIds);
+
+        // Now ensure latest is mounted (simulates user sending a message)
+        var changed = controller.EnsureLatestMounted("user-sent");
+        Assert.True(changed);
+
+        mountedIds = controller.MountedTurns.Select(static turn => turn.StableId).ToArray();
+        Assert.Contains("turn:0011", mountedIds);
+        Assert.True(controller.CaptureSnapshot().MountedPageCount <= 3);
+    }
+
+    [Fact]
+    public void EnsureLatestMounted_NoOpWhenAlreadyAtTail()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 1,
+        });
+        var source = CreateTurns(4);
+
+        controller.BindTranscript(source, "already-tail");
+        controller.ResetToLatest(200, "already-tail");
+
+        var mountedCountBefore = controller.MountedTurns.Count;
+        var changed = controller.EnsureLatestMounted("already-tail");
+        Assert.False(changed);
+        Assert.Equal(mountedCountBefore, controller.MountedTurns.Count);
+    }
+
+    [Fact]
+    public void UserSendsMessageAfterScrollUp_NewTurnIsMountedViaEnsureLatest()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 1,
+            MaxMountedPages = 3,
+            PrependTriggerPixels = 160,
+        });
+        var source = CreateTurns(12, measuredHeightFactory: _ => 120);
+
+        controller.BindTranscript(source, "send-after-scroll");
+        controller.ResetToLatest(200, "send-after-scroll");
+        controller.UpdatePinnedState(false, 260, "send-after-scroll");
+
+        // Scroll up
+        for (var i = 0; i < 4; i++)
+        {
+            controller.UpdateViewport(
+                new TranscriptViewportState(0, 200, 1400 + (i * 120), false, 260),
+                $"scroll-up-{i}");
+        }
+
+        // User types and sends a new message — this adds a turn to the source
+        source.Add(CreateTurn(12, measuredHeight: 120));
+
+        // At this point, the new turn is NOT mounted because user was scrolled away
+        var mountedBefore = controller.MountedTurns.Select(static turn => turn.StableId).ToArray();
+        Assert.DoesNotContain("turn:0012", mountedBefore);
+
+        // EnsureLatestMounted simulates what OnUserMessageSent does
+        controller.EnsureLatestMounted("user-sent");
+
+        var mountedAfter = controller.MountedTurns.Select(static turn => turn.StableId).ToArray();
+        Assert.Contains("turn:0012", mountedAfter);
+        Assert.True(controller.CaptureSnapshot().MountedPageCount <= 3);
+    }
+
     private static ObservableCollection<TranscriptTurn> CreateTurns(
         int count,
         int itemCount = 1,

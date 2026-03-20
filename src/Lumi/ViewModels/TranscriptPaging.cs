@@ -422,6 +422,27 @@ internal sealed class TranscriptWindowController : ObservableObject, IDisposable
             UpdateDiagnostics("pinned", reason);
     }
 
+    /// <summary>
+    /// Ensures the mounted window includes the latest pages (tail-tracking).
+    /// Call when the user sends a message after scrolling up, so the viewport
+    /// snaps to the newest content. Trims head pages to stay within limits.
+    /// </summary>
+    public bool EnsureLatestMounted(string reason)
+    {
+        if (_pages.Count == 0)
+            return false;
+
+        if (_lastMountedPageIndex >= _pages.Count - 1)
+            return false;
+
+        _lastMountedPageIndex = _pages.Count - 1;
+        ClampMountedRange();
+        TrimMountedHeadOverflow();
+        ReconcileMountedTurns(BuildDesiredMountedTurns());
+        UpdateDiagnostics("ensure-latest", reason);
+        return true;
+    }
+
     public TranscriptWindowDiagnosticsSnapshot CaptureSnapshot()
     {
         return new TranscriptWindowDiagnosticsSnapshot(
@@ -490,12 +511,17 @@ internal sealed class TranscriptWindowController : ObservableObject, IDisposable
         }
 
         if (wasMountedToLatestTail)
+        {
             _lastMountedPageIndex = _pages.Count - 1;
+            TrimMountedHeadOverflow();
+        }
         else
+        {
             _lastMountedPageIndex = Math.Min(_lastMountedPageIndex, _pages.Count - 1);
+            TrimMountedTailOverflow();
+        }
 
         ClampMountedRange();
-        TrimMountedTailOverflow();
         ReconcileMountedTurns(BuildDesiredMountedTurns());
 
         if (e.Action is NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Remove)
@@ -657,6 +683,25 @@ internal sealed class TranscriptWindowController : ObservableObject, IDisposable
             return 0;
 
         _lastMountedPageIndex -= removablePages;
+        _cleanupCount++;
+        _pageUnloadCount += removablePages;
+        return removablePages;
+    }
+
+    private int TrimMountedHeadOverflow()
+    {
+        if (_pages.Count == 0)
+            return 0;
+
+        var overflow = MountedPageCount - _options.MaxMountedPages;
+        if (overflow <= 0)
+            return 0;
+
+        var removablePages = Math.Min(overflow, Math.Max(0, _lastMountedPageIndex - _firstMountedPageIndex));
+        if (removablePages <= 0)
+            return 0;
+
+        _firstMountedPageIndex += removablePages;
         _cleanupCount++;
         _pageUnloadCount += removablePages;
         return removablePages;

@@ -341,6 +341,14 @@ public partial class ChatViewModel : ObservableObject
         _transcriptWindow.UpdatePinnedState(isPinnedToBottom, distanceFromBottom, "scroll-state");
     }
 
+    internal bool EnsureLatestTranscriptMounted()
+    {
+        var changed = _transcriptWindow.EnsureLatestMounted("user-sent");
+        if (changed && ShowTranscriptDiagnostics)
+            OnPropertyChanged(nameof(TranscriptDiagnosticsText));
+        return changed;
+    }
+
     internal void RecordTranscriptScrollCompensation(string reason, double beforeOffset, double afterOffset)
     {
         _transcriptWindow.RecordScrollCompensation(reason, beforeOffset, afterOffset);

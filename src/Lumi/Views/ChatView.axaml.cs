@@ -271,6 +271,7 @@ public partial class ChatView : UserControl
     private void OnUserMessageSent()
     {
         _chatShell?.ResetAutoScroll();
+        _subscribedVm?.EnsureLatestTranscriptMounted();
         _chatShell?.ScrollToEnd();
         Dispatcher.UIThread.Post(FocusComposer, DispatcherPriority.Input);
     }
