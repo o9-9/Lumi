@@ -154,7 +154,10 @@ public partial class ProjectsViewModel : ObservableObject
     {
         // Unassign all chats from this project
         foreach (var chat in _dataStore.Data.Chats.Where(c => c.ProjectId == project.Id))
+        {
             chat.ProjectId = null;
+            _dataStore.MarkChatChanged(chat);
+        }
 
         _dataStore.Data.Projects.Remove(project);
         _ = _dataStore.SaveAsync();

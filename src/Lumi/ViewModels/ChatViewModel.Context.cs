@@ -24,7 +24,7 @@ public partial class ChatViewModel
         if (CurrentChat is not null)
         {
             CurrentChat.AgentId = agent?.Id;
-            QueueSaveChat(CurrentChat, saveIndex: true);
+            QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
         }
 
         // If we have an active session, route through the SDK Agent API
@@ -66,7 +66,7 @@ public partial class ChatViewModel
         {
             var changed = CurrentChat.ProjectId != projectId;
             CurrentChat.ProjectId = projectId;
-            QueueSaveChat(CurrentChat, saveIndex: true);
+            QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
             if (changed)
                 OnPropertyChanged(nameof(CurrentChat));
 
@@ -119,7 +119,7 @@ public partial class ChatViewModel
         {
             var changed = CurrentChat.ProjectId is not null;
             CurrentChat.ProjectId = null;
-            QueueSaveChat(CurrentChat, saveIndex: true);
+            QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
             if (changed)
                 OnPropertyChanged(nameof(CurrentChat));
 
@@ -180,7 +180,7 @@ public partial class ChatViewModel
         if (CurrentChat is not null)
         {
             CurrentChat.ActiveSkillIds = new List<Guid>(ActiveSkillIds);
-            QueueSaveChat(CurrentChat, saveIndex: true);
+            QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
         }
     }
 
@@ -229,7 +229,7 @@ public partial class ChatViewModel
         if (CurrentChat is not null)
         {
             CurrentChat.ActiveMcpServerNames = new List<string>(ActiveMcpServerNames);
-            QueueSaveChat(CurrentChat, saveIndex: true);
+            QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
 
             // MCP configuration is session-scoped in the Copilot SDK.
             // Any add/remove must invalidate the current backend session so

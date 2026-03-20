@@ -419,6 +419,7 @@ public partial class MainViewModel : ObservableObject
     {
         ChatVM.CleanupSession(chat.Id);
         _dataStore.Data.Chats.Remove(chat);
+        _dataStore.MarkChatDeleted(chat.Id);
         _dataStore.DeleteChatFile(chat.Id);
         _ = _dataStore.SaveAsync();
         RefreshChatList();
@@ -457,6 +458,7 @@ public partial class MainViewModel : ObservableObject
         if (!string.IsNullOrEmpty(newTitle))
         {
             RenamingChat.Title = newTitle;
+            _dataStore.MarkChatChanged(RenamingChat);
             _ = _dataStore.SaveAsync();
             RefreshChatList();
         }
@@ -504,7 +506,7 @@ public partial class MainViewModel : ObservableObject
         if (parameter is object[] args && args.Length == 2 && args[0] is Chat chat && args[1] is Project project)
         {
             chat.ProjectId = project.Id;
-            chat.UpdatedAt = DateTimeOffset.Now;
+            _dataStore.MarkChatChanged(chat);
             _ = _dataStore.SaveAsync();
             RefreshChatList();
         }
@@ -515,7 +517,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (chat is null) return;
         chat.ProjectId = null;
-        chat.UpdatedAt = DateTimeOffset.Now;
+        _dataStore.MarkChatChanged(chat);
         _ = _dataStore.SaveAsync();
         RefreshChatList();
     }

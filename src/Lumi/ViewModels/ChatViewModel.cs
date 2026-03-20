@@ -551,6 +551,7 @@ public partial class ChatViewModel : ObservableObject
                     mcpServers, effort, userInputHandler, onPermission: null, hooks);
                 var createdSession = await _copilotService.CreateSessionAsync(createConfig, sessionCt);
                 chat.CopilotSessionId = createdSession.SessionId;
+                _dataStore.MarkChatChanged(chat);
                 _activeSession = createdSession;
                 SubscribeToSession(createdSession, chat);
                 return true;
@@ -611,7 +612,7 @@ public partial class ChatViewModel : ObservableObject
             chat.CopilotSessionId = createdSession.SessionId;
             _activeSession = createdSession;
             SubscribeToSession(createdSession, chat);
-            await SaveCurrentChatAsync();
+            await SaveCurrentChatAsync(touchIndex: true);
             return true;
         }
         catch (OperationCanceledException) when (sessionCts is not null && sessionCts.IsCancellationRequested && !ct.IsCancellationRequested)
@@ -921,6 +922,7 @@ public partial class ChatViewModel : ObservableObject
         ReleaseSessionResources(chatId, cancelActiveRequest: true, deleteServerSession: true);
         RemoveSuggestionTracking(chatId);
         CurrentChat.CopilotSessionId = null;
+        _dataStore.MarkChatChanged(CurrentChat);
         _activeSession = null;
     }
 
@@ -1013,7 +1015,7 @@ public partial class ChatViewModel : ObservableObject
         };
         CurrentChat.Messages.Add(userMsg);
         Messages.Add(new ChatMessageViewModel(userMsg));
-        QueueSaveChat(CurrentChat, saveIndex: true);
+        QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
         UserMessageSent?.Invoke();
 
         CancellationTokenSource? cts = null;
@@ -1424,7 +1426,7 @@ public partial class ChatViewModel : ObservableObject
             ScrollToEndRequested?.Invoke();
         }
 
-        QueueSaveChat(chat, saveIndex: true);
+        QueueSaveChat(chat, saveIndex: true, touchIndex: true);
         return true;
     }
 
@@ -1648,14 +1650,18 @@ public partial class ChatViewModel : ObservableObject
         }
     }
 
-    private async Task SaveCurrentChatAsync(bool saveIndex = true)
+    private async Task SaveCurrentChatAsync(bool saveIndex = true, bool touchIndex = false)
     {
         if (CurrentChat is null) return;
+        if (touchIndex)
+            _dataStore.MarkChatChanged(CurrentChat);
         await SaveChatAsync(CurrentChat, saveIndex);
     }
 
-    private void QueueSaveChat(Chat chat, bool saveIndex, bool releaseIfInactive = false)
+    private void QueueSaveChat(Chat chat, bool saveIndex, bool releaseIfInactive = false, bool touchIndex = false)
     {
+        if (touchIndex)
+            _dataStore.MarkChatChanged(chat);
         _ = SaveChatAsync(chat, saveIndex, releaseIfInactive);
     }
 
@@ -1744,7 +1750,7 @@ public partial class ChatViewModel : ObservableObject
             Dispatcher.UIThread.Post(() =>
             {
                 chat.Title = title;
-                chat.UpdatedAt = DateTimeOffset.Now;
+                _dataStore.MarkChatChanged(chat);
                 if (CurrentChat?.Id == chat.Id)
                     OnPropertyChanged(nameof(CurrentChatTitle));
                 if (_dataStore.Data.Settings.AutoSaveChats)
@@ -1846,7 +1852,6 @@ public partial class ChatViewModel : ObservableObject
 
     private async Task SaveChatAsync(Chat chat, bool saveIndex, bool releaseIfInactive = false, CancellationToken cancellationToken = default)
     {
-        chat.UpdatedAt = DateTimeOffset.Now;
         var canEvictMessages = false;
         try
         {
@@ -2018,7 +2023,7 @@ public partial class ChatViewModel : ObservableObject
         };
         CurrentChat.Messages.Add(newUserMsg);
         Messages.Add(new ChatMessageViewModel(newUserMsg));
-        QueueSaveChat(CurrentChat, saveIndex: true);
+        QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
         ScrollToEndRequested?.Invoke();
 
         // Resend

@@ -46,7 +46,7 @@ public partial class ChatViewModel
         if (CurrentChat is not null)
         {
             CurrentChat.PlanContent = value;
-            QueueSaveChat(CurrentChat, saveIndex: true);
+            QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
         }
     }
 
@@ -789,7 +789,7 @@ public partial class ChatViewModel
         if (CurrentChat is not null)
         {
             CurrentChat.SdkAgentName = value;
-            QueueSaveChat(CurrentChat, saveIndex: false);
+            QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
         }
     }
 

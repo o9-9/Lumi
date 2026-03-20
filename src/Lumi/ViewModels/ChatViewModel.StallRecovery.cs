@@ -398,7 +398,7 @@ public partial class ChatViewModel
                 StatusText = string.Empty;
             }
 
-            QueueSaveChat(chat, saveIndex: true, releaseIfInactive: CurrentChat?.Id != chat.Id);
+            QueueSaveChat(chat, saveIndex: true, releaseIfInactive: CurrentChat?.Id != chat.Id, touchIndex: true);
         });
     }
 }

@@ -912,7 +912,7 @@ public partial class ChatViewModel
                         IsStreaming = runtime.IsStreaming;
                         StatusText = runtime.StatusText;
                     }
-                    QueueSaveChat(chat, saveIndex: true);
+                    QueueSaveChat(chat, saveIndex: true, touchIndex: true);
                     });
                     break;
 
@@ -953,7 +953,7 @@ public partial class ChatViewModel
                     {
                     if (!_dataStore.Data.Settings.AutoGenerateTitles) return;
                     chat.Title = title.Data.Title;
-                    chat.UpdatedAt = DateTimeOffset.Now;
+                    _dataStore.MarkChatChanged(chat);
                     if (CurrentChat?.Id == chat.Id)
                         OnPropertyChanged(nameof(CurrentChatTitle));
                     if (_dataStore.Data.Settings.AutoSaveChats)
@@ -1155,7 +1155,7 @@ public partial class ChatViewModel
                     }
                     assistantStream.Clear();
                     reasoningStream.Clear();
-                    QueueSaveChat(chat, saveIndex: true, releaseIfInactive: CurrentChat?.Id != chat.Id);
+                    QueueSaveChat(chat, saveIndex: true, releaseIfInactive: CurrentChat?.Id != chat.Id, touchIndex: true);
                     });
                     break;
 

@@ -14,6 +14,7 @@ public class DataStore
     private static readonly string AppDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Lumi");
     private static readonly string DataFile = Path.Combine(AppDir, "data.json");
+    private static readonly string IndexLockFile = Path.Combine(AppDir, "data.lock");
 
     public static string SkillsDir { get; } = Path.Combine(AppDir, "skills");
     public static string ChatsDir { get; } = Path.Combine(AppDir, "chats");
@@ -23,8 +24,12 @@ public class DataStore
     private readonly SemaphoreSlim _skillSyncLock = new(1, 1);
     private readonly object _chatLoadLocksSync = new();
     private readonly Dictionary<Guid, SemaphoreSlim> _chatLoadLocks = new();
+    private readonly object _chatChangeSync = new();
+    private readonly Dictionary<Guid, long> _dirtyChatVersions = [];
+    private readonly Dictionary<Guid, long> _deletedChatVersions = [];
     private int? _activeSkillSyncHash;
     private string? _activeSkillSyncDirectory;
+    private long _nextChatChangeVersion;
 
     public DataStore()
     {
@@ -43,6 +48,29 @@ public class DataStore
 
     public AppData Data => _data;
 
+    public void MarkChatChanged(Chat chat)
+    {
+        ArgumentNullException.ThrowIfNull(chat);
+
+        chat.UpdatedAt = DateTimeOffset.Now;
+        var version = Interlocked.Increment(ref _nextChatChangeVersion);
+        lock (_chatChangeSync)
+        {
+            _deletedChatVersions.Remove(chat.Id);
+            _dirtyChatVersions[chat.Id] = version;
+        }
+    }
+
+    public void MarkChatDeleted(Guid chatId)
+    {
+        var version = Interlocked.Increment(ref _nextChatChangeVersion);
+        lock (_chatChangeSync)
+        {
+            _dirtyChatVersions.Remove(chatId);
+            _deletedChatVersions[chatId] = version;
+        }
+    }
+
     /// <summary>
     /// Saves the index file (settings, chat metadata, projects, skills, agents, memories).
     /// Does NOT save chat messages — use SaveChat() for that.
@@ -58,11 +86,26 @@ public class DataStore
     /// </summary>
     public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
-        var snapshot = AppDataSnapshotFactory.CreateIndexSnapshot(_data);
-
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        FileStream? indexLock = null;
+        Dictionary<Guid, long>? dirtyChatVersions = null;
+        Dictionary<Guid, long>? deletedChatVersions = null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            indexLock = await AcquireIndexLockAsync(cancellationToken).ConfigureAwait(false);
+            (dirtyChatVersions, deletedChatVersions) = SnapshotChatChangeVersions();
+            var snapshot = AppDataSnapshotFactory.CreateIndexSnapshot(_data);
+            var persistedSnapshot = TryLoadIndexSnapshot();
+            if (persistedSnapshot is not null)
+            {
+                snapshot = AppDataSnapshotFactory.MergeChatIndexChanges(
+                    snapshot,
+                    persistedSnapshot,
+                    new HashSet<Guid>(dirtyChatVersions.Keys),
+                    new HashSet<Guid>(deletedChatVersions.Keys));
+            }
+
             await using var stream = new FileStream(
                 DataFile,
                 FileMode.Create,
@@ -76,9 +119,12 @@ public class DataStore
                 snapshot,
                 AppDataJsonContext.Default.AppData,
                 cancellationToken).ConfigureAwait(false);
+
+            AcknowledgeChatChangeVersions(dirtyChatVersions, deletedChatVersions);
         }
         finally
         {
+            indexLock?.Dispose();
             _writeLock.Release();
         }
     }
@@ -924,5 +970,87 @@ public class DataStore
 
         var json = File.ReadAllText(DataFile);
         return JsonSerializer.Deserialize(json, AppDataJsonContext.Default.AppData) ?? new AppData();
+    }
+
+    private (Dictionary<Guid, long> dirty, Dictionary<Guid, long> deleted) SnapshotChatChangeVersions()
+    {
+        lock (_chatChangeSync)
+        {
+            return (new(_dirtyChatVersions), new(_deletedChatVersions));
+        }
+    }
+
+    private void AcknowledgeChatChangeVersions(
+        IReadOnlyDictionary<Guid, long> dirtyChatVersions,
+        IReadOnlyDictionary<Guid, long> deletedChatVersions)
+    {
+        lock (_chatChangeSync)
+        {
+            foreach (var (chatId, version) in dirtyChatVersions)
+            {
+                if (_dirtyChatVersions.TryGetValue(chatId, out var currentVersion)
+                    && currentVersion == version)
+                {
+                    _dirtyChatVersions.Remove(chatId);
+                }
+            }
+
+            foreach (var (chatId, version) in deletedChatVersions)
+            {
+                if (_deletedChatVersions.TryGetValue(chatId, out var currentVersion)
+                    && currentVersion == version)
+                {
+                    _deletedChatVersions.Remove(chatId);
+                }
+            }
+        }
+    }
+
+    private static AppData? TryLoadIndexSnapshot()
+    {
+        if (!File.Exists(DataFile))
+            return null;
+
+        try
+        {
+            using var stream = new FileStream(
+                DataFile,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                81920,
+                FileOptions.SequentialScan);
+            return JsonSerializer.Deserialize(stream, AppDataJsonContext.Default.AppData);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<FileStream> AcquireIndexLockAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return new FileStream(
+                    IndexLockFile,
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    1,
+                    FileOptions.None);
+            }
+            catch (IOException)
+            {
+                await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using Lumi.Models;
 
@@ -39,24 +40,7 @@ internal static class AppDataSnapshotFactory
                 HasImportedBrowserCookies = settings.HasImportedBrowserCookies,
             },
             Chats = source.Chats
-                .Select(static c => new Chat
-                {
-                    Id = c.Id,
-                    Title = c.Title,
-                    ProjectId = c.ProjectId,
-                    AgentId = c.AgentId,
-                    CopilotSessionId = c.CopilotSessionId,
-                    CreatedAt = c.CreatedAt,
-                    UpdatedAt = c.UpdatedAt,
-                    ActiveSkillIds = [..c.ActiveSkillIds],
-                    ActiveMcpServerNames = [..c.ActiveMcpServerNames],
-                    SdkAgentName = c.SdkAgentName,
-                    WorktreePath = c.WorktreePath,
-                    LastModelUsed = c.LastModelUsed,
-                    TotalInputTokens = c.TotalInputTokens,
-                    TotalOutputTokens = c.TotalOutputTokens,
-                    PlanContent = c.PlanContent,
-                })
+                .Select(CloneChatIndex)
                 .ToList(),
             Projects = source.Projects
                 .Select(static p => new Project
@@ -127,6 +111,76 @@ internal static class AppDataSnapshotFactory
                     UpdatedAt = m.UpdatedAt
                 })
                 .ToList(),
+        };
+    }
+
+    public static AppData MergeChatIndexChanges(
+        AppData currentSnapshot,
+        AppData persistedSnapshot,
+        ISet<Guid> dirtyChatIds,
+        ISet<Guid> deletedChatIds)
+    {
+        if (currentSnapshot.Chats.Count == 0 && persistedSnapshot.Chats.Count == 0)
+            return currentSnapshot;
+
+        var currentChatsById = currentSnapshot.Chats.ToDictionary(static c => c.Id);
+        var persistedChatIds = new HashSet<Guid>();
+        var mergedChats = new List<Chat>(Math.Max(currentSnapshot.Chats.Count, persistedSnapshot.Chats.Count));
+
+        foreach (var persistedChat in persistedSnapshot.Chats)
+        {
+            persistedChatIds.Add(persistedChat.Id);
+
+            if (deletedChatIds.Contains(persistedChat.Id))
+                continue;
+
+            if (dirtyChatIds.Contains(persistedChat.Id)
+                && currentChatsById.TryGetValue(persistedChat.Id, out var currentChat)
+                && currentChat.UpdatedAt >= persistedChat.UpdatedAt)
+            {
+                mergedChats.Add(CloneChatIndex(currentChat));
+                continue;
+            }
+
+            mergedChats.Add(CloneChatIndex(persistedChat));
+        }
+
+        foreach (var currentChat in currentSnapshot.Chats)
+        {
+            if (deletedChatIds.Contains(currentChat.Id)
+                || persistedChatIds.Contains(currentChat.Id)
+                || !dirtyChatIds.Contains(currentChat.Id))
+            {
+                continue;
+            }
+
+            mergedChats.Add(CloneChatIndex(currentChat));
+        }
+
+        currentSnapshot.Chats = mergedChats;
+        return currentSnapshot;
+    }
+
+    private static Chat CloneChatIndex(Chat source)
+    {
+        return new Chat
+        {
+            Id = source.Id,
+            Title = source.Title,
+            ProjectId = source.ProjectId,
+            AgentId = source.AgentId,
+            CopilotSessionId = source.CopilotSessionId,
+            CreatedAt = source.CreatedAt,
+            UpdatedAt = source.UpdatedAt,
+            ActiveSkillIds = [..source.ActiveSkillIds],
+            ActiveMcpServerNames = [..source.ActiveMcpServerNames],
+            SessionMode = source.SessionMode,
+            SdkAgentName = source.SdkAgentName,
+            WorktreePath = source.WorktreePath,
+            LastModelUsed = source.LastModelUsed,
+            TotalInputTokens = source.TotalInputTokens,
+            TotalOutputTokens = source.TotalOutputTokens,
+            PlanContent = source.PlanContent,
         };
     }
 }
