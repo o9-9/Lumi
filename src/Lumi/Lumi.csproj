@@ -66,4 +66,9 @@
     <ProjectReference Include="$(StrataPath)" />
   </ItemGroup>
 
+  <!-- Exclude test harness from Release builds -->
+  <ItemGroup Condition="'$(Configuration)' != 'Debug'">
+    <Compile Remove="OnboardingAgentTest.cs" />
+  </ItemGroup>
+
 </Project>

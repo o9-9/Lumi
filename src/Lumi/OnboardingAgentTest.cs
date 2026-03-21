@@ -1,4 +1,3 @@
-#if DEBUG
 // Onboarding Agent Test Harness
 // Run: cd E:\Git\Lumi-wt-lumi-1c81523f && dotnet run --project src/Lumi -- --test-onboarding-agent
 //
@@ -567,4 +566,3 @@ public static class OnboardingAgentTest
         return output.Trim();
     }
 }
-#endif
