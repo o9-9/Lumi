@@ -22,9 +22,9 @@
     <!-- ── SVG Icon Paths ── -->
     <StreamGeometry x:Key="Icon.Chat">M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7l-4 3V6a2 2 0 0 1 2-2z</StreamGeometry>
     <StreamGeometry x:Key="Icon.Folder">M2 6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z</StreamGeometry>
-    <StreamGeometry x:Key="Icon.Bolt">M13 2L3 14h9l-1 8 10-12h-9l1-8z</StreamGeometry>
-    <StreamGeometry x:Key="Icon.Sparkle">M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z</StreamGeometry>
-    <StreamGeometry x:Key="Icon.Gear">M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm-1-8h2l.4 2.2a8 8 0 0 1 2.3 1.3l2.1-.8 1 1.7-1.7 1.4a8 8 0 0 1 0 2.4l1.7 1.4-1 1.7-2.1-.8a8 8 0 0 1-2.3 1.3L13 22h-2l-.4-2.2a8 8 0 0 1-2.3-1.3l-2.1.8-1-1.7 1.7-1.4a8 8 0 0 1 0-2.4L5.2 12.4l1-1.7 2.1.8a8 8 0 0 1 2.3-1.3L11 8z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Bolt">M21.64 3.64l-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72z M14 7l3 3 M5 6v4 M19 14v4 M10 2v2 M7 8H3 M21 16h-4 M11 3H9</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Sparkle">M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z M20 2v4 M22 4h-4 M4 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Gear">M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915z M12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6z</StreamGeometry>
     <StreamGeometry x:Key="Icon.Compose">M15.2 3.8a2.4 2.4 0 0 1 3.4 0l1.6 1.6a2.4 2.4 0 0 1 0 3.4L9 20l-5 1 1-5L15.2 3.8z</StreamGeometry>
     <StreamGeometry x:Key="Icon.Search">M10 3a7 7 0 1 0 4.2 12.6l4.1 4.1a1 1 0 0 0 1.4-1.4l-4.1-4.1A7 7 0 0 0 10 3zm-5 7a5 5 0 1 1 10 0 5 5 0 0 1-10 0z</StreamGeometry>
     <StreamGeometry x:Key="Icon.Plus">M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1z</StreamGeometry>
@@ -50,56 +50,57 @@
       <Setter Property="Margin" Value="1,0" />
       <Setter Property="MinHeight" Value="0" />
     </Style>
-    <!-- Nav icon buttons: use subtle as base for reliable hit testing -->
+    <!-- Nav pill — always visible, glass effect -->
+    <Style Selector="Border.nav-pill">
+      <Setter Property="CornerRadius" Value="18" />
+      <Setter Property="Padding" Value="5" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BoxShadow" Value="0 1 6 0 #16000000" />
+    </Style>
+
+    <!-- Nav icon buttons inside pill -->
     <Style Selector="Button.nav-icon">
-      <Setter Property="Padding" Value="7" />
+      <Setter Property="Padding" Value="0" />
       <Setter Property="MinWidth" Value="0" />
       <Setter Property="MinHeight" Value="0" />
-      <Setter Property="CornerRadius" Value="{DynamicResource Radius.Base}" />
+      <Setter Property="Width" Value="26" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="CornerRadius" Value="9" />
       <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
       <Setter Property="Focusable" Value="False" />
-      <Setter Property="Opacity" Value="0.9" />
-      <Setter Property="Transitions">
-        <Transitions>
-          <DoubleTransition Property="Opacity" Duration="0:0:0.14" />
-        </Transitions>
-      </Setter>
+      <Setter Property="Cursor" Value="Hand" />
       <Setter Property="ToolTip.Placement" Value="Top" />
-      <Setter Property="ToolTip.VerticalOffset" Value="-4" />
+      <Setter Property="ToolTip.VerticalOffset" Value="-6" />
     </Style>
-    <Style Selector="Button.nav-icon:pointerover">
-      <Setter Property="Opacity" Value="1" />
+    <Style Selector="Button.nav-icon:pointerover /template/ Border#PART_Surface">
+      <Setter Property="Background" Value="#12FFFFFF" />
     </Style>
-    <Style Selector="Button.nav-icon:pressed">
-      <Setter Property="Opacity" Value="0.84" />
+    <Style Selector="Button.nav-icon:pressed /template/ Border#PART_Surface">
+      <Setter Property="Background" Value="#0CFFFFFF" />
     </Style>
     <Style Selector="Button.nav-icon.active">
-      <Setter Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
-      <Setter Property="Opacity" Value="1" />
+      <Setter Property="Background" Value="#1CFFFFFF" />
     </Style>
     <Style Selector="Button.nav-icon.active:pointerover /template/ Border#PART_Surface">
-      <Setter Property="Background" Value="{DynamicResource Brush.AccentSubtleHover}" />
+      <Setter Property="Background" Value="#24FFFFFF" />
     </Style>
     <Style Selector="Button.nav-icon PathIcon">
-      <Setter Property="Opacity" Value="0.78" />
-      <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
-      <Setter Property="RenderTransform" Value="translateY(0px)" />
+      <Setter Property="Opacity" Value="0.4" />
       <Setter Property="Transitions">
         <Transitions>
-          <DoubleTransition Property="Opacity" Duration="0:0:0.16" />
-          <BrushTransition Property="Foreground" Duration="0:0:0.16" />
-          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.2" Easing="0.2,0 0,1" />
+          <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
+          <BrushTransition Property="Foreground" Duration="0:0:0.15" />
         </Transitions>
       </Setter>
     </Style>
     <Style Selector="Button.nav-icon:pointerover PathIcon">
-      <Setter Property="Opacity" Value="1" />
+      <Setter Property="Opacity" Value="0.85" />
       <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
-      <Setter Property="RenderTransform" Value="translateY(-1px)" />
     </Style>
     <Style Selector="Button.nav-icon:pressed PathIcon">
-      <Setter Property="Opacity" Value="0.82" />
-      <Setter Property="RenderTransform" Value="translateY(0px)" />
+      <Setter Property="Opacity" Value="0.65" />
     </Style>
     <Style Selector="Button.nav-icon.active PathIcon">
       <Setter Property="Opacity" Value="1" />
@@ -220,46 +221,51 @@
           <!-- ── Top: Title bar inset (respects window chrome) ── -->
           <Border DockPanel.Dock="Top" IsHitTestVisible="False" Height="30" />
 
-          <!-- ── Bottom: Nav row ── -->
-          <Border DockPanel.Dock="Bottom">
-            <StackPanel x:Name="NavRow" Orientation="Horizontal" Spacing="0"
-                        Margin="14,6,14,8">
-              <Button Classes="subtle nav-icon" x:Name="NavChat" ToolTip.Tip="{loc:Str Nav_Chats}"
-                      Command="{Binding SetNavCommand}" CommandParameter="0">
-                <PathIcon Data="{StaticResource Icon.Chat}" Width="16" Height="16"
-                          Foreground="{DynamicResource Brush.TextSecondary}" />
-              </Button>
-              <Button Classes="subtle nav-icon" x:Name="NavProjects" ToolTip.Tip="{loc:Str Nav_Projects}"
-                      Command="{Binding SetNavCommand}" CommandParameter="1">
-                <PathIcon Data="{StaticResource Icon.Folder}" Width="16" Height="16"
-                          Foreground="{DynamicResource Brush.TextSecondary}" />
-              </Button>
-              <Button Classes="subtle nav-icon" x:Name="NavSkills" ToolTip.Tip="{loc:Str Nav_Skills}"
-                      Command="{Binding SetNavCommand}" CommandParameter="2">
-                <PathIcon Data="{StaticResource Icon.Bolt}" Width="16" Height="16"
-                          Foreground="{DynamicResource Brush.TextSecondary}" />
-              </Button>
-              <Button Classes="subtle nav-icon" x:Name="NavAgents" ToolTip.Tip="{loc:Str Nav_Lumis}"
-                      Command="{Binding SetNavCommand}" CommandParameter="3">
-                <PathIcon Data="{StaticResource Icon.Sparkle}" Width="16" Height="16"
-                          Foreground="{DynamicResource Brush.TextSecondary}" />
-              </Button>
-              <Button Classes="subtle nav-icon" x:Name="NavMemories" ToolTip.Tip="{loc:Str Nav_Memories}"
-                      Command="{Binding SetNavCommand}" CommandParameter="4">
-                <PathIcon Data="{StaticResource Icon.Memory}" Width="16" Height="16"
-                          Foreground="{DynamicResource Brush.TextSecondary}" />
-              </Button>
-              <Button Classes="subtle nav-icon" x:Name="NavMcpServers" ToolTip.Tip="{loc:Str Nav_McpServers}"
-                      Command="{Binding SetNavCommand}" CommandParameter="5">
-                <PathIcon Data="{StaticResource Icon.Plug}" Width="16" Height="16"
-                          Foreground="{DynamicResource Brush.TextSecondary}" />
-              </Button>
-              <Button Classes="subtle nav-icon" x:Name="NavSettings" ToolTip.Tip="{loc:Str Nav_Settings}"
-                      Command="{Binding SetNavCommand}" CommandParameter="6">
-                <PathIcon Data="{StaticResource Icon.Gear}" Width="16" Height="16"
-                          Foreground="{DynamicResource Brush.TextSecondary}" />
-              </Button>
-            </StackPanel>
+          <!-- ── Bottom: Nav pill (always visible) ── -->
+          <Border DockPanel.Dock="Bottom" Margin="14,4,14,12">
+            <Border Classes="nav-pill" x:Name="NavPill"
+                    BorderBrush="#10FFFFFF">
+              <Border.Background>
+                <SolidColorBrush Color="{DynamicResource Color.Surface1}" Opacity="0.55" />
+              </Border.Background>
+              <StackPanel x:Name="NavRow" Orientation="Horizontal" Spacing="3">
+                <Button Classes="subtle nav-icon" x:Name="NavChat" ToolTip.Tip="{loc:Str Nav_Chats}"
+                        Command="{Binding SetNavCommand}" CommandParameter="0">
+                  <PathIcon Data="{StaticResource Icon.Chat}" Width="14" Height="14"
+                            Foreground="{DynamicResource Brush.TextSecondary}" />
+                </Button>
+                <Button Classes="subtle nav-icon" x:Name="NavProjects" ToolTip.Tip="{loc:Str Nav_Projects}"
+                        Command="{Binding SetNavCommand}" CommandParameter="1">
+                  <PathIcon Data="{StaticResource Icon.Folder}" Width="14" Height="14"
+                            Foreground="{DynamicResource Brush.TextSecondary}" />
+                </Button>
+                <Button Classes="subtle nav-icon" x:Name="NavSkills" ToolTip.Tip="{loc:Str Nav_Skills}"
+                        Command="{Binding SetNavCommand}" CommandParameter="2">
+                  <PathIcon Data="{StaticResource Icon.Bolt}" Width="14" Height="14"
+                            Foreground="{DynamicResource Brush.TextSecondary}" />
+                </Button>
+                <Button Classes="subtle nav-icon" x:Name="NavAgents" ToolTip.Tip="{loc:Str Nav_Lumis}"
+                        Command="{Binding SetNavCommand}" CommandParameter="3">
+                  <PathIcon Data="{StaticResource Icon.Sparkle}" Width="14" Height="14"
+                            Foreground="{DynamicResource Brush.TextSecondary}" />
+                </Button>
+                <Button Classes="subtle nav-icon" x:Name="NavMemories" ToolTip.Tip="{loc:Str Nav_Memories}"
+                        Command="{Binding SetNavCommand}" CommandParameter="4">
+                  <PathIcon Data="{StaticResource Icon.Memory}" Width="14" Height="14"
+                            Foreground="{DynamicResource Brush.TextSecondary}" />
+                </Button>
+                <Button Classes="subtle nav-icon" x:Name="NavMcpServers" ToolTip.Tip="{loc:Str Nav_McpServers}"
+                        Command="{Binding SetNavCommand}" CommandParameter="5">
+                  <PathIcon Data="{StaticResource Icon.Plug}" Width="14" Height="14"
+                            Foreground="{DynamicResource Brush.TextSecondary}" />
+                </Button>
+                <Button Classes="subtle nav-icon" x:Name="NavSettings" ToolTip.Tip="{loc:Str Nav_Settings}"
+                        Command="{Binding SetNavCommand}" CommandParameter="6">
+                  <PathIcon Data="{StaticResource Icon.Gear}" Width="14" Height="14"
+                            Foreground="{DynamicResource Brush.TextSecondary}" />
+                </Button>
+              </StackPanel>
+            </Border>
           </Border>
 
           <!-- ═══ SIDEBAR CONTENT PANELS (one per tab, wrapped for DockPanel fill) ═══ -->
