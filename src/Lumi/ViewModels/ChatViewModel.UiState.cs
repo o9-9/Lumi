@@ -71,6 +71,9 @@ public partial class ChatViewModel
     public bool IsWorktreeLocked => CurrentChat is not null;
     private int _gitRefreshVersion;
     public ObservableCollection<GitFileChangeViewModel> GitChangedFiles { get; } = [];
+    /// <summary>Existing worktrees available for selection (excludes main repo).</summary>
+    public ObservableCollection<WorktreeInfo> AvailableWorktrees { get; } = [];
+    public bool HasAvailableWorktrees => AvailableWorktrees.Count > 0;
     public bool HasGitChanges => GitChangedFileCount > 0;
     public bool ShowGitStatusBadge => IsRefreshingGitStatus || HasGitChanges;
     public string GitChangesLabel => GitChangedFileCount switch
@@ -885,6 +888,8 @@ public partial class ChatViewModel
 
         if (!isGit)
         {
+            AvailableWorktrees.Clear();
+            OnPropertyChanged(nameof(HasAvailableWorktrees));
             return;
         }
 
@@ -892,11 +897,21 @@ public partial class ChatViewModel
         var workDir = savedWorktreePath ?? projectDir;
         var branchTask = GitService.GetCurrentBranchAsync(workDir);
         var changesTask = GitService.GetChangedFilesAsync(workDir);
+        var worktreesTask = GitService.ListWorktreeInfoAsync(projectDir);
 
-        await Task.WhenAll(branchTask, changesTask).ConfigureAwait(false);
+        await Task.WhenAll(branchTask, changesTask, worktreesTask).ConfigureAwait(false);
 
         var branch = await branchTask;
         var changes = await changesTask;
+        var worktrees = await worktreesTask;
+
+        // Exclude the main repo worktree (it's the "Local" option)
+        // Normalize paths to handle forward/backward slash differences from git output
+        static string NormalizePath(string p) =>
+            Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedProjectDir = NormalizePath(projectDir);
+        worktrees.RemoveAll(w =>
+            string.Equals(NormalizePath(w.Path), normalizedProjectDir, StringComparison.OrdinalIgnoreCase));
 
         // A newer refresh was started while we were awaiting — discard these stale results.
         if (version != Volatile.Read(ref _gitRefreshVersion))
@@ -913,6 +928,12 @@ public partial class ChatViewModel
             GitChangedFiles.Clear();
             foreach (var c in changes)
                 GitChangedFiles.Add(new GitFileChangeViewModel(c));
+
+            AvailableWorktrees.Clear();
+            foreach (var wt in worktrees)
+                AvailableWorktrees.Add(wt);
+            OnPropertyChanged(nameof(HasAvailableWorktrees));
+
             IsRefreshingGitStatus = false;
         });
     }
@@ -931,6 +952,22 @@ public partial class ChatViewModel
         IsWorktreeMode = !IsWorktreeMode;
         if (!IsWorktreeMode)
             WorktreePath = null;
+    }
+
+    /// <summary>Selects an existing worktree. Sets worktree mode with the given path
+    /// so no new worktree is created on first message.</summary>
+    [RelayCommand]
+    private async Task SelectExistingWorktree(string path)
+    {
+        if (CurrentChat is not null) return;
+        if (!Directory.Exists(path)) return;
+
+        IsWorktreeMode = true;
+        WorktreePath = path;
+
+        // Update branch display to reflect the selected worktree
+        var branch = await GitService.GetCurrentBranchAsync(path).ConfigureAwait(false);
+        Dispatcher.UIThread.Post(() => GitBranch = branch);
     }
 
     [RelayCommand]

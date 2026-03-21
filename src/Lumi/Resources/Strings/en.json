@@ -479,6 +479,7 @@
   "Git_OpenIDE": "Open in IDE",
   "Git_CopyBranch": "Copy branch name",
   "Git_CopyPath": "Copy directory path",
+  "Git_ExistingWorktrees": "Use existing worktree",
 
   "Dialog_DeleteWorktreeTitle": "Delete chat with worktree",
   "Dialog_DeleteWorktreeMessage": "This chat has an associated git worktree. Would you like to also remove the worktree and its branch?",

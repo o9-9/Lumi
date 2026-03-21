@@ -194,6 +194,51 @@ public static class GitService
             .ToList();
     }
 
+    /// <summary>Lists existing worktrees with their branch names.</summary>
+    public static async Task<List<WorktreeInfo>> ListWorktreeInfoAsync(string dir)
+    {
+        var output = await RunGitAsync(dir, "worktree list --porcelain").ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(output)) return [];
+
+        var results = new List<WorktreeInfo>();
+        string? currentPath = null;
+        string? currentBranch = null;
+        bool isBare = false;
+
+        foreach (var rawLine in output.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.StartsWith("worktree "))
+            {
+                // Save previous entry
+                if (currentPath is not null && !isBare)
+                    results.Add(new WorktreeInfo(currentPath, currentBranch));
+
+                currentPath = line[9..].Trim();
+                currentBranch = null;
+                isBare = false;
+            }
+            else if (line.StartsWith("branch "))
+            {
+                // branch refs/heads/main → main
+                var refName = line[7..].Trim();
+                currentBranch = refName.StartsWith("refs/heads/")
+                    ? refName["refs/heads/".Length..]
+                    : refName;
+            }
+            else if (line == "bare")
+            {
+                isBare = true;
+            }
+        }
+
+        // Save last entry
+        if (currentPath is not null && !isBare)
+            results.Add(new WorktreeInfo(currentPath, currentBranch));
+
+        return results;
+    }
+
     private static async Task<string?> RunGitAsync(string workDir, string args)
     {
         try
@@ -227,6 +272,13 @@ public static class GitService
 }
 
 public enum GitChangeKind { Modified, Added, Deleted, Renamed, Untracked }
+
+/// <summary>Represents a git worktree with its path and branch name.</summary>
+public record WorktreeInfo(string Path, string? Branch)
+{
+    /// <summary>Display name: branch name if available, otherwise the directory name.</summary>
+    public string DisplayName => Branch ?? System.IO.Path.GetFileName(Path);
+}
 
 public class GitFileChange
 {

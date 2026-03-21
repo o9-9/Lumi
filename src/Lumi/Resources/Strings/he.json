@@ -479,6 +479,7 @@
   "Git_OpenIDE": "פתח ב-IDE",
   "Git_CopyBranch": "העתק שם ענף",
   "Git_CopyPath": "העתק נתיב תיקייה",
+  "Git_ExistingWorktrees": "השתמש ב-worktree קיים",
 
   "Dialog_DeleteWorktreeTitle": "מחיקת שיחה עם worktree",
   "Dialog_DeleteWorktreeMessage": "לשיחה זו יש worktree משויך. האם ברצונך למחוק גם את ה-worktree והענף שלו?",

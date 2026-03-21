@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:model="using:Lumi.Models"
              xmlns:vm="using:Lumi.ViewModels"
+             xmlns:services="using:Lumi.Services"
              xmlns:lc="using:Lumi.Views.Controls"
              xmlns:sc="using:StrataTheme.Controls"
              xmlns:loc="using:Lumi.Localization"
@@ -842,6 +843,27 @@
                   <MenuItem.Icon>
                     <PathIcon Width="14" Height="14" Data="M8 1H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm0 1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h4zm4 3h-1V4h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8v-1h4a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z" />
                   </MenuItem.Icon>
+                </MenuItem>
+                <Separator IsVisible="{Binding HasAvailableWorktrees}" />
+                <MenuItem Header="{loc:Str Git_ExistingWorktrees}"
+                          ItemsSource="{Binding AvailableWorktrees}"
+                          IsVisible="{Binding HasAvailableWorktrees}"
+                          IsEnabled="{Binding !IsWorktreeLocked}">
+                  <MenuItem.Icon>
+                    <PathIcon Width="14" Height="14" Data="M4 2a2 2 0 0 0-2 2v1h20V4a2 2 0 0 0-2-2H4zm16 5H4v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7zm-7 2a1 1 0 0 1 1 1v2h2a1 1 0 1 1 0 2h-2v2a1 1 0 1 1-2 0v-2H10a1 1 0 1 1 0-2h2v-2a1 1 0 0 1 1-1z" />
+                  </MenuItem.Icon>
+                  <MenuItem.ItemContainerTheme>
+                    <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}" x:DataType="services:WorktreeInfo">
+                      <Setter Property="Header" Value="{Binding DisplayName}" />
+                      <Setter Property="Command" Value="{Binding $parent[ItemsControl].((vm:ChatViewModel)DataContext).SelectExistingWorktreeCommand}" />
+                      <Setter Property="CommandParameter" Value="{Binding Path}" />
+                      <Setter Property="Icon">
+                        <Template>
+                          <PathIcon Width="14" Height="14" Data="M6 3v6a3 3 0 0 0 3 3h2a1 1 0 0 1 1 1v2m0 0a2 2 0 1 0 4 0 2 2 0 0 0-4 0zM6 3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm0 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm0 0V9" />
+                        </Template>
+                      </Setter>
+                    </ControlTheme>
+                  </MenuItem.ItemContainerTheme>
                 </MenuItem>
               </MenuFlyout>
             </Button.Flyout>
