@@ -941,7 +941,7 @@ public partial class ChatViewModel
     /// <summary>Toggles worktree mode. Only works before a chat is created (on the welcome screen).
     /// The actual worktree is created lazily when the first message is sent.</summary>
     [RelayCommand]
-    private void ToggleWorktreePreChat()
+    private async Task ToggleWorktreePreChat()
     {
         // Locked once a chat exists
         if (CurrentChat is not null) return;
@@ -951,7 +951,12 @@ public partial class ChatViewModel
 
         IsWorktreeMode = !IsWorktreeMode;
         if (!IsWorktreeMode)
+        {
             WorktreePath = null;
+            // Refresh branch display back to the main repo
+            var branch = await GitService.GetCurrentBranchAsync(projectDir).ConfigureAwait(false);
+            Dispatcher.UIThread.Post(() => GitBranch = branch);
+        }
     }
 
     /// <summary>Selects an existing worktree. Sets worktree mode with the given path
