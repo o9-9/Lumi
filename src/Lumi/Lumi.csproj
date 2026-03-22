@@ -55,15 +55,9 @@
     <PackageReference Include="AvaloniaMcp.Diagnostics" Version="0.4.0" Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
 
-  <!-- Prefer local sibling Strata repo for development; fall back to submodule -->
-  <PropertyGroup>
-    <StrataPath Condition="Exists('..\..\..\Strata\src\StrataTheme\StrataTheme.csproj')">..\..\..\Strata\src\StrataTheme\StrataTheme.csproj</StrataPath>
-    <StrataPath Condition="'$(StrataPath)' == ''">..\..\Strata\src\StrataTheme\StrataTheme.csproj</StrataPath>
-  </PropertyGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\Lumi.Generators\Lumi.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="$(StrataPath)" />
+    <ProjectReference Include="..\..\Strata\src\StrataTheme\StrataTheme.csproj" />
   </ItemGroup>
 
   <!-- Exclude test harness from Release builds -->
