@@ -63,6 +63,8 @@ public partial class ChatViewModel : ObservableObject
     private readonly List<Guid> _pendingSkillInjections = new();
     /// <summary>Per-chat guard so suggestion generation is queued at most once concurrently.</summary>
     private readonly HashSet<Guid> _suggestionGenerationInFlightChats = new();
+    /// <summary>Maps chat ID → unsent composer draft text. Guid.Empty is used for the "new chat" state.</summary>
+    private readonly Dictionary<Guid, string> _chatDrafts = new();
     /// <summary>Tracks the last assistant message ID that already produced suggestions per chat.</summary>
     private readonly Dictionary<Guid, Guid> _lastSuggestedAssistantMessageByChat = new();
 
@@ -692,6 +694,13 @@ public partial class ChatViewModel : ObservableObject
 
         if (CurrentChat?.Id != chat.Id)
         {
+            // Save unsent composer draft for the chat we're leaving
+            var leavingId = CurrentChat?.Id ?? Guid.Empty;
+            if (!string.IsNullOrEmpty(PromptText))
+                _chatDrafts[leavingId] = PromptText!;
+            else
+                _chatDrafts.Remove(leavingId);
+
             BrowserHideRequested?.Invoke();
             DiffHideRequested?.Invoke();
             ClearSuggestions();
@@ -748,6 +757,10 @@ public partial class ChatViewModel : ObservableObject
 
                 CurrentChat = chat;
                 chat.HasUnreadMessages = false; // Clear unread when switching to this chat
+
+                // Restore unsent composer draft for this chat
+                PromptText = _chatDrafts.TryGetValue(chat.Id, out var draft) ? draft : "";
+
                 if (previousChat is not null)
                 {
                     var previousRuntime = GetOrCreateRuntimeState(previousChat.Id);
@@ -909,6 +922,13 @@ public partial class ChatViewModel : ObservableObject
             catch (ObjectDisposedException) { }
         }
 
+        // Save unsent composer draft for the chat we're leaving
+        var leavingId = CurrentChat?.Id ?? Guid.Empty;
+        if (!string.IsNullOrEmpty(PromptText))
+            _chatDrafts[leavingId] = PromptText!;
+        else
+            _chatDrafts.Remove(leavingId);
+
         BrowserHideRequested?.Invoke();
         DiffHideRequested?.Invoke();
         PlanHideRequested?.Invoke();
@@ -953,6 +973,9 @@ public partial class ChatViewModel : ObservableObject
         IsPlanOpen = false;
         SelectedSdkAgentName = null;
         SdkAgentChips.Clear();
+
+        // Restore unsent composer draft for the "new chat" state
+        PromptText = _chatDrafts.TryGetValue(Guid.Empty, out var draft) ? draft : "";
 
         SyncComposerProjectSelectionFromState();
         RefreshProjectBadge();
@@ -1000,6 +1023,7 @@ public partial class ChatViewModel : ObservableObject
 
         var prompt = PromptText!.Trim();
         PromptText = "";
+        _chatDrafts.Remove(CurrentChat?.Id ?? Guid.Empty);
         ClearSuggestions();
 
         var attachments = TakePendingAttachments();
