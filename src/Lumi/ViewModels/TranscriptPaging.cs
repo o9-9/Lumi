@@ -514,6 +514,14 @@ internal sealed class TranscriptWindowController : ObservableObject, IDisposable
         {
             _lastMountedPageIndex = _pages.Count - 1;
             TrimMountedHeadOverflow();
+
+            // After trimming, backfill earlier pages if there's room. Without
+            // this, _firstMountedPageIndex ratchets up permanently over repeated
+            // add/remove cycles (e.g. typing indicator shown at turn start,
+            // hidden at turn end) — each Add may trim the head for overflow,
+            // but the subsequent Remove never reclaims the freed slot.
+            while (_firstMountedPageIndex > 0 && MountedPageCount < _options.MaxMountedPages)
+                _firstMountedPageIndex--;
         }
         else
         {
