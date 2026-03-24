@@ -6,6 +6,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
 using Avalonia.Layout;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Lumi.ViewModels;
@@ -118,6 +120,7 @@ public sealed class TranscriptTurnControl : UserControl
         _isAttachedToVisualTree = true;
         SubscribeToTurnItems(_turn);
         RebuildItemHosts();
+        ScheduleLayoutVerification();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -165,6 +168,29 @@ public sealed class TranscriptTurnControl : UserControl
 
         foreach (var item in _turn.Items)
             _itemsHost.Children.Add(CreateItemHost(item));
+    }
+
+    /// <summary>
+    /// After layout settles, verify this control has non-zero height when it
+    /// has content.  If a DataTemplate resolution or measure pass was missed
+    /// (race between attachment order and layout), force a re-measure so the
+    /// turn becomes visible.
+    /// </summary>
+    private void ScheduleLayoutVerification()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_isAttachedToVisualTree || _turn is null || _turn.Items.Count == 0)
+                return;
+
+            if (Bounds.Height >= 1)
+                return;
+
+            InvalidateMeasure();
+            InvalidateArrange();
+            (this.GetVisualParent() as Control)?.InvalidateMeasure();
+            (this.GetVisualParent()?.GetVisualParent() as Control)?.InvalidateMeasure();
+        }, DispatcherPriority.Loaded);
     }
 
     private static Control CreateItemHost(TranscriptItem item)

@@ -341,11 +341,10 @@ public partial class ChatView : UserControl
         if (_chatShell.CurrentDistanceFromBottom > 20)
             return;
 
-        // If the scroll offset from the top is small, the first user message
-        // is likely just barely above the viewport. A user message bubble is
-        // typically ~150px; with padding and spacing the first turn occupies
-        // roughly ~200px. Use a generous threshold to cover varied layouts.
-        if (offset <= 350)
+        // If the scroll offset from the top is modest, the first user message
+        // is likely just above the viewport. Matches the ShortTranscriptMaxScroll
+        // threshold (600) in StrataChatShell.
+        if (offset <= 650)
             _chatShell.ScrollToVerticalOffset(0);
     }
 
