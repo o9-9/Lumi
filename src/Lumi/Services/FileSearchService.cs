@@ -238,6 +238,11 @@ public sealed class FileSearchService
     ///
     /// Penalties:
     ///   -1 per  — directory depth (shallower files win ties)
+    ///
+    /// Fuzzy matching (when substring match fails):
+    ///    45 — fuzzy match in filename (query chars appear in order)
+    ///    15 — fuzzy match in path only
+    ///   +15 max — consecutive-char bonus (rewards tighter matches)
     /// </summary>
     internal static int ScoreMatch(string relativePath, string[] queryParts)
     {
@@ -246,16 +251,27 @@ public sealed class FileSearchService
         // Normalize separators for consistent matching
         var normalized = relativePath.Replace('\\', '/');
 
-        // Check all query parts match (required condition)
+        // Check all query parts match — try substring first, then fuzzy
+        var allSubstring = true;
         foreach (var part in queryParts)
         {
             if (!normalized.Contains(part, StringComparison.OrdinalIgnoreCase))
-                return 0;
+            {
+                allSubstring = false;
+                break;
+            }
         }
 
         var firstPart = queryParts[0];
         var fileName = Path.GetFileName(normalized);
         var fileNameNoExt = Path.GetFileNameWithoutExtension(normalized);
+
+        if (!allSubstring)
+        {
+            // Fuzzy fallback: check if query chars appear in order (subsequence match)
+            var joinedQuery = queryParts.Length == 1 ? firstPart : string.Join("", queryParts);
+            return ScoreFuzzyMatch(normalized, fileName, joinedQuery);
+        }
 
         // ── Base score from match tier ──────────────────────────────
         int score;
@@ -322,6 +338,88 @@ public sealed class FileSearchService
         score -= depth;
 
         return Math.Max(score, 1);
+    }
+
+    /// <summary>
+    /// Scores a fuzzy (subsequence) match. Tries filename first (higher base score),
+    /// falls back to full path match.
+    /// </summary>
+    private static int ScoreFuzzyMatch(string normalizedPath, string fileName, string query)
+    {
+        var (fileNameFuzzy, consecutiveBonus) = FuzzyMatch(fileName, query);
+        if (fileNameFuzzy)
+        {
+            var s = 45 + Math.Min(consecutiveBonus, 15);
+            if (IsSourceFileExtension(Path.GetExtension(fileName)))
+                s += 5;
+            var d = 0;
+            foreach (var ch in normalizedPath)
+                if (ch == '/') d++;
+            s -= d;
+            return Math.Max(s, 1);
+        }
+
+        var (pathFuzzy, pathConsBonus) = FuzzyMatch(normalizedPath, query);
+        if (pathFuzzy)
+        {
+            var s = 15 + Math.Min(pathConsBonus, 10);
+            if (IsSourceFileExtension(Path.GetExtension(fileName)))
+                s += 5;
+            var d = 0;
+            foreach (var ch in normalizedPath)
+                if (ch == '/') d++;
+            s -= d;
+            return Math.Max(s, 1);
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Checks if <paramref name="query"/> is a subsequence of <paramref name="text"/>
+    /// (all query characters appear in order, case-insensitive).
+    /// Returns (isMatch, consecutiveBonus) where consecutiveBonus rewards runs of
+    /// consecutive matching characters (higher = tighter match).
+    /// </summary>
+    internal static (bool IsMatch, int ConsecutiveBonus) FuzzyMatch(string text, string query)
+    {
+        if (query.Length == 0) return (true, 0);
+        if (query.Length > text.Length) return (false, 0);
+
+        var qi = 0;
+        var consecutive = 0;
+        var maxConsecutive = 0;
+        var totalConsecutive = 0;
+        var lastMatchIndex = -2;
+
+        for (var ti = 0; ti < text.Length && qi < query.Length; ti++)
+        {
+            if (char.ToLowerInvariant(text[ti]) == char.ToLowerInvariant(query[qi]))
+            {
+                if (ti == lastMatchIndex + 1)
+                {
+                    consecutive++;
+                    if (consecutive > maxConsecutive)
+                        maxConsecutive = consecutive;
+                }
+                else
+                {
+                    consecutive = 1;
+                }
+                totalConsecutive += consecutive;
+                lastMatchIndex = ti;
+                qi++;
+            }
+        }
+
+        if (qi < query.Length)
+            return (false, 0);
+
+        // Bonus formula: reward long consecutive runs
+        // e.g., "chtvw" matching "ChatView" has runs of 2+1+1+1 = lower bonus
+        //        "chatvi" matching "ChatView" has a run of 6 = higher bonus
+        var bonus = maxConsecutive + (totalConsecutive / 2);
+        return (true, bonus);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
