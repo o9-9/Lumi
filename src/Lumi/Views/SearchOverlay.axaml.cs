@@ -25,7 +25,7 @@ public partial class SearchOverlay : UserControl
     private TextBlock? _emptyState;
     private ScrollViewer? _resultsScroller;
     private int _lastRenderedSelection = -1;
-    private bool _isAnimating;
+    private long _lastAnimateOpenTick;
 
     public SearchOverlay()
     {
@@ -51,9 +51,13 @@ public partial class SearchOverlay : UserControl
     {
         base.OnPropertyChanged(change);
 
-        if (change.Property == IsVisibleProperty && change.GetNewValue<bool>() && !_isAnimating)
+        if (change.Property == IsVisibleProperty && change.GetNewValue<bool>())
         {
-            _isAnimating = true;
+            // Debounce: ignore repeated IsVisible=true within the animation window
+            var now = Environment.TickCount64;
+            if (now - _lastAnimateOpenTick < 400) return;
+            _lastAnimateOpenTick = now;
+
             // Reset stratum line to collapsed state before animating
             if (_stratumLine is not null)
             {
@@ -66,7 +70,6 @@ public partial class SearchOverlay : UserControl
                 _searchInput?.Focus();
                 _searchInput?.SelectAll();
                 AnimateOpen();
-                _isAnimating = false;
             }, DispatcherPriority.Render);
         }
     }
