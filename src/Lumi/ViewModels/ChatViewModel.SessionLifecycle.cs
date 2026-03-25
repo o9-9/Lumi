@@ -37,6 +37,7 @@ public partial class ChatViewModel
         ChatMessage? reasoningMsg = null;
         ChatMessageViewModel? streamingVm = null;
         ChatMessageViewModel? reasoningVm = null;
+        string? turnModelId = null;
         var agentName = ActiveAgent?.Name ?? Loc.Author_Lumi;
         var runtime = GetOrCreateRuntimeState(chat.Id);
         var toolParentById = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -287,7 +288,7 @@ public partial class ChatViewModel
                     Author = agentName,
                     Content = currentContent,
                     IsStreaming = true,
-                    Model = chat.LastModelUsed ?? SelectedModel
+                    Model = turnModelId
                 };
                 _inProgressMessages[chat.Id] = streamingMsg;
                 if (_activeSession == session)
@@ -369,6 +370,7 @@ public partial class ChatViewModel
                 case AssistantTurnStartEvent:
                     Dispatcher.UIThread.Post(() =>
                     {
+                        turnModelId = chat.LastModelUsed ?? SelectedModel;
                         runtime.IsBusy = true;
                         runtime.IsStreaming = true;
                         runtime.StatusText = Loc.Status_Thinking;
@@ -455,7 +457,7 @@ public partial class ChatViewModel
                                 Author = agentName,
                                 Content = finalContent,
                                 IsStreaming = false,
-                                Model = chat.LastModelUsed ?? SelectedModel
+                                Model = turnModelId
                             };
                             if (_pendingSearchSources.Count > 0)
                             {
@@ -863,7 +865,7 @@ public partial class ChatViewModel
                     {
                         _transcriptBuilder.HideTypingIndicator();
                         _transcriptBuilder.CloseCurrentToolGroup();
-                        _transcriptBuilder.AppendModelLabel(chat.LastModelUsed);
+                        _transcriptBuilder.AppendModelLabel(turnModelId);
                         IsBusy = runtime.IsBusy;
                         IsStreaming = runtime.IsStreaming;
                         StatusText = runtime.StatusText;
