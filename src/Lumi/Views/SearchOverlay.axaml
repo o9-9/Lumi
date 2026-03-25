@@ -6,18 +6,18 @@
              IsVisible="{Binding IsOpen}">
 
   <UserControl.Styles>
-    <!-- Scrim background -->
+    <!-- ═══ Scrim ═══ -->
     <Style Selector="Border.search-scrim">
       <Setter Property="Background" Value="{DynamicResource Brush.OverlayScrim}" />
     </Style>
 
-    <!-- The main card -->
+    <!-- ═══ Card surface ═══ -->
     <Style Selector="Border.search-card">
       <Setter Property="Background" Value="{DynamicResource Brush.SurfaceOverlay}" />
       <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderDefault}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="{DynamicResource Radius.Overlay}" />
-      <Setter Property="BoxShadow" Value="0 16 48 0 #3C000000, 0 4 12 0 #1A000000" />
+      <Setter Property="BoxShadow" Value="0 16 64 0 #50000000, 0 4 16 0 #24000000, 0 0 0 1 #10FFFFFF" />
       <Setter Property="MaxWidth" Value="560" />
       <Setter Property="MinWidth" Value="420" />
       <Setter Property="MaxHeight" Value="480" />
@@ -28,10 +28,11 @@
       <Setter Property="ClipToBounds" Value="True" />
     </Style>
 
-    <!-- Search input styling — fully suppress Strata TextBox chrome -->
+    <!-- ═══ TextBox — chromeless ═══ -->
     <Style Selector="TextBox.search-input">
       <Setter Property="FontSize" Value="15" />
-      <Setter Property="Padding" Value="10,12" />
+      <Setter Property="FontWeight" Value="Regular" />
+      <Setter Property="Padding" Value="10,13" />
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
@@ -63,7 +64,7 @@
       <Setter Property="IsVisible" Value="False" />
     </Style>
 
-    <!-- Category header -->
+    <!-- ═══ Category header ═══ -->
     <Style Selector="TextBlock.search-category">
       <Setter Property="FontSize" Value="11" />
       <Setter Property="FontWeight" Value="SemiBold" />
@@ -71,48 +72,44 @@
       <Setter Property="LetterSpacing" Value="0.5" />
     </Style>
 
-    <!-- Result item -->
+    <!-- ═══ Result item ═══ -->
     <Style Selector="Button.search-result-item">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-      <Setter Property="Padding" Value="14,7" />
-      <Setter Property="Margin" Value="4,0" />
+      <Setter Property="Padding" Value="14,8" />
+      <Setter Property="Margin" Value="6,1" />
       <Setter Property="CornerRadius" Value="{DynamicResource Radius.Base}" />
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Cursor" Value="Hand" />
-      <Setter Property="Transitions">
-        <Transitions>
-          <BrushTransition Property="Background" Duration="0:0:0.12" />
-        </Transitions>
-      </Setter>
     </Style>
     <Style Selector="Button.search-result-item:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource Brush.ControlHover}" />
     </Style>
     <Style Selector="Button.search-result-item.selected /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Brush.AccentDefault}" />
+      <Setter Property="BorderThickness" Value="2,0,0,0" />
+      <Setter Property="CornerRadius" Value="{DynamicResource Radius.Base}" />
     </Style>
     <Style Selector="Button.search-result-item.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
     </Style>
 
-    <!-- Result title -->
+    <!-- ═══ Result text ═══ -->
     <Style Selector="TextBlock.search-result-title">
       <Setter Property="FontSize" Value="13" />
       <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
     </Style>
-
-    <!-- Result subtitle -->
     <Style Selector="TextBlock.search-result-subtitle">
       <Setter Property="FontSize" Value="11" />
       <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-      <Setter Property="Margin" Value="0,1,0,0" />
+      <Setter Property="Margin" Value="0,2,0,0" />
     </Style>
 
-    <!-- Content match badge -->
+    <!-- ═══ Badges ═══ -->
     <Style Selector="Border.content-match-badge">
       <Setter Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
       <Setter Property="CornerRadius" Value="{DynamicResource Radius.Full}" />
@@ -120,41 +117,40 @@
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="Margin" Value="8,0,0,0" />
     </Style>
+    <Style Selector="Border.current-badge">
+      <Setter Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
+      <Setter Property="CornerRadius" Value="{DynamicResource Radius.Full}" />
+      <Setter Property="Padding" Value="6,2" />
+    </Style>
 
-    <!-- Empty state -->
+    <!-- ═══ Empty state ═══ -->
     <Style Selector="TextBlock.search-empty">
       <Setter Property="FontSize" Value="13" />
       <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
       <Setter Property="HorizontalAlignment" Value="Center" />
-      <Setter Property="Margin" Value="0,32" />
+      <Setter Property="Margin" Value="0,40" />
     </Style>
 
-    <!-- Keyboard shortcut badge -->
+    <!-- ═══ Keyboard badge ═══ -->
     <Style Selector="Border.kbd">
       <Setter Property="Background" Value="{DynamicResource Brush.ControlDefault}" />
-      <Setter Property="CornerRadius" Value="4" />
-      <Setter Property="Padding" Value="5,2" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Padding" Value="4,1" />
       <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
       <Setter Property="BorderThickness" Value="1" />
-    </Style>
-
-    <!-- Current tab badge -->
-    <Style Selector="Border.current-badge">
-      <Setter Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
-      <Setter Property="CornerRadius" Value="{DynamicResource Radius.Full}" />
-      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="Opacity" Value="0.7" />
     </Style>
   </UserControl.Styles>
 
-  <!-- Full-screen overlay -->
+  <!-- ═══ Full-screen overlay ═══ -->
   <Panel>
-    <!-- Scrim (click to close) -->
+    <!-- Scrim -->
     <Border Classes="search-scrim" x:Name="Scrim" />
 
-    <!-- Search card -->
+    <!-- Card -->
     <Border Classes="search-card" x:Name="SearchCard">
       <DockPanel>
-        <!-- Stratum line accent at top — animates on open -->
+        <!-- Stratum line — animates on open -->
         <Border DockPanel.Dock="Top" Height="2"
                 Background="{DynamicResource Brush.StratumLine}"
                 x:Name="StratumLine"
@@ -163,7 +159,7 @@
                 Opacity="0">
           <Border.Transitions>
             <Transitions>
-              <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.35" Easing="CubicEaseOut" />
+              <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.4" Easing="CubicEaseOut" />
               <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
             </Transitions>
           </Border.Transitions>
@@ -171,16 +167,15 @@
 
         <!-- Search input area -->
         <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource Brush.BorderSubtle}"
-                BorderThickness="0,0,0,1">
+                BorderThickness="0,0,0,1" Padding="0,2">
           <DockPanel>
             <PathIcon DockPanel.Dock="Left"
                       Data="M10 3a7 7 0 1 0 4.2 12.6l4.1 4.1a1 1 0 0 0 1.4-1.4l-4.1-4.1A7 7 0 0 0 10 3zm-5 7a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"
-                      Width="15" Height="15"
+                      Width="14" Height="14"
                       Foreground="{DynamicResource Brush.TextTertiary}"
                       Margin="16,0,0,0" VerticalAlignment="Center" />
-            <!-- Shortcut hints (must be before non-docked content) -->
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4"
-                        VerticalAlignment="Center" Margin="0,0,14,0">
+                        VerticalAlignment="Center" Margin="0,0,12,0">
               <Border Classes="kbd">
                 <TextBlock Text="Esc" FontSize="10"
                            Foreground="{DynamicResource Brush.TextTertiary}" />
@@ -188,82 +183,81 @@
             </StackPanel>
             <TextBox x:Name="SearchInput" Classes="search-input"
                      Text="{Binding SearchQuery, Mode=TwoWay}"
-                     PlaceholderText="Search chats, projects, skills, lumis…" />
+                     PlaceholderText="Search everything…" />
           </DockPanel>
         </Border>
 
-        <!-- Bottom bar with navigation hints (must dock before ScrollViewer fills remaining space) -->
+        <!-- Footer — keyboard hints -->
         <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.BorderSubtle}"
-                BorderThickness="0,1,0,0" Padding="14,6">
-          <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
-            <StackPanel Orientation="Horizontal" Spacing="4">
+                BorderThickness="0,1,0,0" Padding="14,5">
+          <StackPanel Orientation="Horizontal" Spacing="14" HorizontalAlignment="Center" Opacity="0.65">
+            <StackPanel Orientation="Horizontal" Spacing="3">
               <Border Classes="kbd"><TextBlock Text="↑↓" FontSize="10" Foreground="{DynamicResource Brush.TextTertiary}" /></Border>
               <TextBlock Text="Navigate" FontSize="10" Foreground="{DynamicResource Brush.TextTertiary}" VerticalAlignment="Center" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="4">
+            <StackPanel Orientation="Horizontal" Spacing="3">
               <Border Classes="kbd"><TextBlock Text="↵" FontSize="10" Foreground="{DynamicResource Brush.TextTertiary}" /></Border>
               <TextBlock Text="Open" FontSize="10" Foreground="{DynamicResource Brush.TextTertiary}" VerticalAlignment="Center" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="4">
+            <StackPanel Orientation="Horizontal" Spacing="3">
               <Border Classes="kbd"><TextBlock Text="Esc" FontSize="10" Foreground="{DynamicResource Brush.TextTertiary}" /></Border>
               <TextBlock Text="Close" FontSize="10" Foreground="{DynamicResource Brush.TextTertiary}" VerticalAlignment="Center" />
             </StackPanel>
           </StackPanel>
         </Border>
 
-        <!-- Results area (fills remaining space) -->
+        <!-- Results (fills remaining space) -->
         <ScrollViewer x:Name="ResultsScroller"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
           <Panel>
-            <!-- Empty state -->
-            <TextBlock Classes="search-empty"
-                       Text="No results found"
-                       x:Name="EmptyState"
-                       IsVisible="False" />
+            <TextBlock Classes="search-empty" Text="No results found"
+                       x:Name="EmptyState" IsVisible="False" />
 
-            <!-- Result groups -->
             <ItemsControl x:Name="ResultsList"
                           ItemsSource="{Binding ResultGroups}"
-                          Margin="0,2,0,6">
+                          Margin="0,4,0,4">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:SearchResultGroup">
                   <StackPanel>
                     <!-- Category header -->
-                    <DockPanel Margin="16,10,16,4">
+                    <DockPanel Margin="18,10,18,4">
                       <Border Classes="current-badge" DockPanel.Dock="Right"
                               IsVisible="{Binding IsCurrentTab}">
                         <TextBlock Text="Current" FontSize="10" FontWeight="Medium"
                                    Foreground="{DynamicResource Brush.AccentDefault}" />
                       </Border>
-                      <PathIcon Data="{Binding CategoryGeometry}" Width="12" Height="12"
+                      <PathIcon Data="{Binding CategoryGeometry}" Width="11" Height="11"
                                 Foreground="{DynamicResource Brush.TextTertiary}"
-                                Margin="0,0,7,0" VerticalAlignment="Center" />
+                                Margin="0,0,6,0" VerticalAlignment="Center" />
                       <TextBlock Classes="search-category"
                                  Text="{Binding Category}" VerticalAlignment="Center" />
                     </DockPanel>
 
-                    <!-- Items in this group -->
+                    <!-- Items -->
                     <ItemsControl ItemsSource="{Binding Items}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:SearchResultItem">
                           <Button Classes="search-result-item"
-                                  Tag="{Binding}"
-                                  Click="OnResultItemClicked">
+                                  Tag="{Binding}" Click="OnResultItemClicked">
                             <DockPanel>
-                              <!-- Content match indicator -->
-                              <Border DockPanel.Dock="Right"
-                                      Classes="content-match-badge"
+                              <Border DockPanel.Dock="Right" Classes="content-match-badge"
                                       IsVisible="{Binding IsContentMatch}">
                                 <TextBlock Text="in content" FontSize="10"
                                            Foreground="{DynamicResource Brush.AccentDefault}" />
                               </Border>
 
-                              <StackPanel Margin="0,1">
-                                <TextBlock Classes="search-result-title"
-                                           Text="{Binding Title}" />
-                                <TextBlock Classes="search-result-subtitle"
-                                           Text="{Binding Subtitle}"
+                              <!-- Category icon per result -->
+                              <PathIcon DockPanel.Dock="Left"
+                                        Data="{Binding CategoryGeometry}"
+                                        Width="13" Height="13"
+                                        Foreground="{DynamicResource Brush.TextTertiary}"
+                                        Margin="0,0,10,0" VerticalAlignment="Center"
+                                        Opacity="0.45" />
+
+                              <StackPanel VerticalAlignment="Center">
+                                <TextBlock Classes="search-result-title" Text="{Binding Title}" />
+                                <TextBlock Classes="search-result-subtitle" Text="{Binding Subtitle}"
                                            IsVisible="{Binding Subtitle.Length}" />
                               </StackPanel>
                             </DockPanel>

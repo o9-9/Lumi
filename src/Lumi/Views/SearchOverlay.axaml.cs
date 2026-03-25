@@ -183,6 +183,21 @@ public partial class SearchOverlay : UserControl
 
     private void AnimateOpen()
     {
+        // ── Scrim fade-in ──
+        if (_scrim is not null)
+        {
+            var scrimVisual = ElementComposition.GetElementVisual(_scrim);
+            if (scrimVisual?.Compositor is { } scrimComp)
+            {
+                var scrimFade = scrimComp.CreateScalarKeyFrameAnimation();
+                scrimFade.InsertKeyFrame(0f, 0f);
+                scrimFade.InsertKeyFrame(1f, 1f);
+                scrimFade.Duration = TimeSpan.FromMilliseconds(180);
+                scrimVisual.StartAnimation("Opacity", scrimFade);
+            }
+        }
+
+        // ── Card entrance (OverlayAnimationHelper-style spring) ──
         if (_searchCard is null) return;
 
         var visual = ElementComposition.GetElementVisual(_searchCard);
@@ -192,28 +207,30 @@ public partial class SearchOverlay : UserControl
         var h = (float)_searchCard.Bounds.Height;
         if (w <= 0) w = 560;
         if (h <= 0) h = 400;
-        visual.CenterPoint = new System.Numerics.Vector3(w / 2f, 0f, 0f);
+        visual.CenterPoint = new System.Numerics.Vector3(w / 2f, h / 2f, 0f);
 
-        // Scale animation: 0.97 → 1.0 (subtle, vertical only from top)
+        // Scale: 0.92 → 1.005 (overshoot at 60%) → 1.0
         var scaleAnim = compositor.CreateVector3KeyFrameAnimation();
-        scaleAnim.InsertKeyFrame(0f, new System.Numerics.Vector3(1f, 0.97f, 1f));
+        scaleAnim.InsertKeyFrame(0f, new System.Numerics.Vector3(0.92f, 0.92f, 1f));
+        scaleAnim.InsertKeyFrame(0.6f, new System.Numerics.Vector3(1.005f, 1.005f, 1f));
         scaleAnim.InsertKeyFrame(1f, new System.Numerics.Vector3(1f, 1f, 1f));
-        scaleAnim.Duration = TimeSpan.FromMilliseconds(200);
+        scaleAnim.Duration = TimeSpan.FromMilliseconds(220);
         visual.StartAnimation("Scale", scaleAnim);
 
-        // Opacity animation: 0 → 1
+        // Opacity: 0 → 1 (fast, completes before scale)
         var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
         opacityAnim.InsertKeyFrame(0f, 0f);
+        opacityAnim.InsertKeyFrame(0.45f, 1f);
         opacityAnim.InsertKeyFrame(1f, 1f);
-        opacityAnim.Duration = TimeSpan.FromMilliseconds(150);
+        opacityAnim.Duration = TimeSpan.FromMilliseconds(220);
         visual.StartAnimation("Opacity", opacityAnim);
 
-        // Animate stratum line: scaleX(0) → scaleX(1) with a slight delay
+        // ── Stratum line sweep-in ──
         if (_stratumLine is not null)
         {
             Dispatcher.UIThread.Post(async () =>
             {
-                await Task.Delay(80);
+                await Task.Delay(100);
                 if (_stratumLine is null) return;
                 _stratumLine.Opacity = 1;
                 _stratumLine.RenderTransform = TransformOperations.Parse("scaleX(1)");
