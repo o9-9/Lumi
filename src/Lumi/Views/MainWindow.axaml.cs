@@ -46,7 +46,7 @@ public partial class MainWindow : Window
     private StackPanel? _projectFilterBar;
     private ScrollViewer? _projectFilterScroller;
     private readonly List<(Project Project, PropertyChangedEventHandler Handler)> _projectFilterHandlers = [];
-    private TextBox? _chatSearchBox;
+    private SearchOverlay? _searchOverlay;
     private ChatView? _chatView;
     private BrowserView? _browserView;
     private ContentControl? _browserHost;
@@ -228,7 +228,7 @@ public partial class MainWindow : Window
         if (_projectFilterScroller is not null)
             _projectFilterScroller.PointerWheelChanged += OnProjectFilterScrollerWheel;
 
-        _chatSearchBox = this.FindControl<TextBox>("ChatSearchBox");
+        _searchOverlay = this.FindControl<SearchOverlay>("SearchOverlay");
         _chatView = this.FindControl<ChatView>("PageChat");
         _browserHost = this.FindControl<ContentControl>("BrowserHost");
         _projectsHost = this.FindControl<ContentControl>("PageProjectsHost");
@@ -398,6 +398,18 @@ public partial class MainWindow : Window
             return; // Block other shortcuts while rename dialog is open
         }
 
+        // ── Search overlay is open: only allow Escape and let overlay handle its own keys ──
+        if (vm.SearchOverlayVM.IsOpen)
+        {
+            if (e.Key == Key.Escape && noMods)
+            {
+                vm.SearchOverlayVM.Close();
+                e.Handled = true;
+            }
+            // Don't process other main shortcuts while overlay is open
+            return;
+        }
+
         // ── Ctrl+N — New chat ──
         if (ctrl && !shift && e.Key == Key.N)
         {
@@ -417,16 +429,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        // ── Ctrl+K — Focus chat search ──
+        // ── Ctrl+K — Open search overlay ──
         if (ctrl && !shift && e.Key == Key.K)
         {
-            if (vm.SelectedNavIndex != 0)
-                vm.SelectedNavIndex = 0;
-            Dispatcher.UIThread.Post(() =>
-            {
-                _chatSearchBox?.Focus();
-                _chatSearchBox?.SelectAll();
-            }, DispatcherPriority.Input);
+            vm.SearchOverlayVM.Open();
             e.Handled = true;
             return;
         }
@@ -469,17 +475,6 @@ public partial class MainWindow : Window
             }
         }
 
-        // ── Escape — Clear search / deselect chat ──
-        if (e.Key == Key.Escape && noMods)
-        {
-            // If search has text, clear it
-            if (vm.SelectedNavIndex == 0 && !string.IsNullOrEmpty(vm.ChatSearchQuery))
-            {
-                vm.ChatSearchQuery = "";
-                e.Handled = true;
-                return;
-            }
-        }
     }
 
     private void HideToTray()
@@ -542,6 +537,9 @@ public partial class MainWindow : Window
             {
                 Dispatcher.UIThread.Post(() => AnimateSidebarTitle(chatId, newTitle));
             };
+
+            // Wire search overlay result selection
+            vm.SearchOverlayVM.ResultSelected += result => OnSearchResultSelected(vm, result);
 
             // Wire settings for density and font size
             vm.SettingsVM.PropertyChanged += (_, args) =>
@@ -1795,6 +1793,44 @@ public partial class MainWindow : Window
             opacity = 0.62;
 
         _acrylicFallback.Opacity = opacity;
+    }
+
+    /// <summary>Handles navigation when a search result is selected from the command palette.</summary>
+    private void OnSearchResultSelected(MainViewModel vm, SearchResultItem result)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            // Navigate to the appropriate tab
+            vm.SelectedNavIndex = result.NavIndex;
+
+            // Select the appropriate item based on type
+            switch (result.Item)
+            {
+                case Chat chat:
+                    vm.OpenChatCommand.Execute(chat);
+                    break;
+
+                case Project project:
+                    vm.ProjectsVM.SelectedProject = project;
+                    break;
+
+                case Skill skill:
+                    vm.SkillsVM.SelectedSkill = skill;
+                    break;
+
+                case LumiAgent agent:
+                    vm.AgentsVM.SelectedAgent = agent;
+                    break;
+
+                case Memory memory:
+                    vm.MemoriesVM.SelectedMemory = memory;
+                    break;
+
+                case McpServer server:
+                    vm.McpServersVM.SelectedServer = server;
+                    break;
+            }
+        });
     }
 
     /// <summary>Whether the browser panel is currently visible.</summary>

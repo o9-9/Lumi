@@ -306,26 +306,6 @@
                   </StackPanel>
                 </Button>
               </Border>
-              <Border DockPanel.Dock="Top" Margin="16,8,16,0">
-                <TextBox PlaceholderText="{loc:Str Sidebar_Search}" x:Name="ChatSearchBox"
-                         Text="{Binding ChatSearchQuery, Mode=TwoWay}"
-                         Padding="4,6,4,6" FontSize="{DynamicResource Font.SizeCaption}">
-                  <TextBox.InnerLeftContent>
-                    <PathIcon Data="{StaticResource Icon.Search}" Width="12" Height="12"
-                              Foreground="{DynamicResource Brush.TextTertiary}"
-                              Margin="7,0,4,0" />
-                  </TextBox.InnerLeftContent>
-                  <TextBox.InnerRightContent>
-                    <Button Classes="subtle" Padding="4" MinHeight="0" MinWidth="0"
-                            Margin="0,0,3,0" CornerRadius="4"
-                            Command="{Binding ClearChatSearchCommand}"
-                            IsVisible="{Binding ChatSearchQuery.Length}">
-                      <PathIcon Data="{StaticResource Icon.Dismiss}" Width="10" Height="10"
-                                Foreground="{DynamicResource Brush.TextTertiary}" />
-                    </Button>
-                  </TextBox.InnerRightContent>
-                </TextBox>
-              </Border>
               <!-- ── Project filter pills ── -->
               <Border DockPanel.Dock="Top" Margin="10,8,10,0"
                       IsVisible="{Binding Projects.Count}">
@@ -446,25 +426,6 @@
                            Foreground="{DynamicResource Brush.TextSecondary}"
                            VerticalAlignment="Center" Margin="6,0,0,0" />
               </DockPanel>
-              <Border DockPanel.Dock="Top" Margin="16,8,16,0">
-                <TextBox PlaceholderText="{loc:Str Sidebar_Search}" Text="{Binding SearchQuery}"
-                         Padding="4,6,4,6" FontSize="{DynamicResource Font.SizeCaption}">
-                  <TextBox.InnerLeftContent>
-                    <PathIcon Data="{StaticResource Icon.Search}" Width="12" Height="12"
-                              Foreground="{DynamicResource Brush.TextTertiary}"
-                              Margin="7,0,4,0" />
-                  </TextBox.InnerLeftContent>
-                  <TextBox.InnerRightContent>
-                    <Button Classes="subtle" Padding="4" MinHeight="0" MinWidth="0"
-                            Margin="0,0,3,0" CornerRadius="4"
-                            Command="{Binding ClearSearchCommand}"
-                            IsVisible="{Binding SearchQuery.Length}">
-                      <PathIcon Data="{StaticResource Icon.Dismiss}" Width="10" Height="10"
-                                Foreground="{DynamicResource Brush.TextTertiary}" />
-                    </Button>
-                  </TextBox.InnerRightContent>
-                </TextBox>
-              </Border>
               <ListBox x:Name="ProjectsListBox" Classes="sidebar-list" Margin="8,8,8,8"
                        ItemsSource="{Binding Projects}"
                        SelectedItem="{Binding SelectedProject, Mode=TwoWay}"
@@ -533,25 +494,6 @@
                            Foreground="{DynamicResource Brush.TextSecondary}"
                            VerticalAlignment="Center" Margin="6,0,0,0" />
               </DockPanel>
-              <Border DockPanel.Dock="Top" Margin="16,8,16,0">
-                <TextBox PlaceholderText="{loc:Str Sidebar_Search}" Text="{Binding SearchQuery}"
-                         Padding="4,6,4,6" FontSize="{DynamicResource Font.SizeCaption}">
-                  <TextBox.InnerLeftContent>
-                    <PathIcon Data="{StaticResource Icon.Search}" Width="12" Height="12"
-                              Foreground="{DynamicResource Brush.TextTertiary}"
-                              Margin="7,0,4,0" />
-                  </TextBox.InnerLeftContent>
-                  <TextBox.InnerRightContent>
-                    <Button Classes="subtle" Padding="4" MinHeight="0" MinWidth="0"
-                            Margin="0,0,3,0" CornerRadius="4"
-                            Command="{Binding ClearSearchCommand}"
-                            IsVisible="{Binding SearchQuery.Length}">
-                      <PathIcon Data="{StaticResource Icon.Dismiss}" Width="10" Height="10"
-                                Foreground="{DynamicResource Brush.TextTertiary}" />
-                    </Button>
-                  </TextBox.InnerRightContent>
-                </TextBox>
-              </Border>
               <ListBox Classes="sidebar-list" Margin="8,8,8,8"
                        ItemsSource="{Binding Skills}"
                        SelectedItem="{Binding SelectedSkill, Mode=TwoWay}"
@@ -597,25 +539,6 @@
                            Foreground="{DynamicResource Brush.TextSecondary}"
                            VerticalAlignment="Center" Margin="6,0,0,0" />
               </DockPanel>
-              <Border DockPanel.Dock="Top" Margin="16,8,16,0">
-                <TextBox PlaceholderText="{loc:Str Sidebar_Search}" Text="{Binding SearchQuery}"
-                         Padding="4,6,4,6" FontSize="{DynamicResource Font.SizeCaption}">
-                  <TextBox.InnerLeftContent>
-                    <PathIcon Data="{StaticResource Icon.Search}" Width="12" Height="12"
-                              Foreground="{DynamicResource Brush.TextTertiary}"
-                              Margin="7,0,4,0" />
-                  </TextBox.InnerLeftContent>
-                  <TextBox.InnerRightContent>
-                    <Button Classes="subtle" Padding="4" MinHeight="0" MinWidth="0"
-                            Margin="0,0,3,0" CornerRadius="4"
-                            Command="{Binding ClearSearchCommand}"
-                            IsVisible="{Binding SearchQuery.Length}">
-                      <PathIcon Data="{StaticResource Icon.Dismiss}" Width="10" Height="10"
-                                Foreground="{DynamicResource Brush.TextTertiary}" />
-                    </Button>
-                  </TextBox.InnerRightContent>
-                </TextBox>
-              </Border>
               <ListBox Classes="sidebar-list" Margin="8,8,8,8"
                        ItemsSource="{Binding Agents}"
                        SelectedItem="{Binding SelectedAgent, Mode=TwoWay}"
@@ -665,25 +588,6 @@
                            Foreground="{DynamicResource Brush.TextSecondary}"
                            VerticalAlignment="Center" Margin="6,0,0,0" />
               </DockPanel>
-              <Border DockPanel.Dock="Top" Margin="16,8,16,0">
-                <TextBox PlaceholderText="{loc:Str Sidebar_Search}" Text="{Binding SearchQuery}"
-                         Padding="4,6,4,6" FontSize="{DynamicResource Font.SizeCaption}">
-                  <TextBox.InnerLeftContent>
-                    <PathIcon Data="{StaticResource Icon.Search}" Width="12" Height="12"
-                              Foreground="{DynamicResource Brush.TextTertiary}"
-                              Margin="7,0,4,0" />
-                  </TextBox.InnerLeftContent>
-                  <TextBox.InnerRightContent>
-                    <Button Classes="subtle" Padding="4" MinHeight="0" MinWidth="0"
-                            Margin="0,0,3,0" CornerRadius="4"
-                            Command="{Binding ClearSearchCommand}"
-                            IsVisible="{Binding SearchQuery.Length}">
-                      <PathIcon Data="{StaticResource Icon.Dismiss}" Width="10" Height="10"
-                                Foreground="{DynamicResource Brush.TextTertiary}" />
-                    </Button>
-                  </TextBox.InnerRightContent>
-                </TextBox>
-              </Border>
               <ListBox Classes="sidebar-list" Margin="8,8,8,8"
                        ItemsSource="{Binding Memories}"
                        SelectedItem="{Binding SelectedMemory, Mode=TwoWay}"
@@ -737,25 +641,6 @@
                            Foreground="{DynamicResource Brush.TextSecondary}"
                            VerticalAlignment="Center" Margin="6,0,0,0" />
               </DockPanel>
-              <Border DockPanel.Dock="Top" Margin="16,8,16,0">
-                <TextBox PlaceholderText="{loc:Str Sidebar_Search}" Text="{Binding SearchQuery}"
-                         Padding="4,6,4,6" FontSize="{DynamicResource Font.SizeCaption}">
-                  <TextBox.InnerLeftContent>
-                    <PathIcon Data="{StaticResource Icon.Search}" Width="12" Height="12"
-                              Foreground="{DynamicResource Brush.TextTertiary}"
-                              Margin="7,0,4,0" />
-                  </TextBox.InnerLeftContent>
-                  <TextBox.InnerRightContent>
-                    <Button Classes="subtle" Padding="4" MinHeight="0" MinWidth="0"
-                            Margin="0,0,3,0" CornerRadius="4"
-                            Command="{Binding ClearSearchCommand}"
-                            IsVisible="{Binding SearchQuery.Length}">
-                      <PathIcon Data="{StaticResource Icon.Dismiss}" Width="10" Height="10"
-                                Foreground="{DynamicResource Brush.TextTertiary}" />
-                    </Button>
-                  </TextBox.InnerRightContent>
-                </TextBox>
-              </Border>
               <ListBox Classes="sidebar-list" Margin="8,8,8,8"
                        ItemsSource="{Binding Servers}"
                        SelectedItem="{Binding SelectedServer, Mode=TwoWay}"
@@ -807,25 +692,6 @@
                            Foreground="{DynamicResource Brush.TextSecondary}"
                            VerticalAlignment="Center" Margin="6,0,0,0" />
               </DockPanel>
-              <Border DockPanel.Dock="Top" Margin="16,8,16,0">
-                <TextBox PlaceholderText="{loc:Str Sidebar_SearchSettings}" Text="{Binding SearchQuery}"
-                         Padding="4,6,4,6" FontSize="{DynamicResource Font.SizeCaption}">
-                  <TextBox.InnerLeftContent>
-                    <PathIcon Data="{StaticResource Icon.Search}" Width="12" Height="12"
-                              Foreground="{DynamicResource Brush.TextTertiary}"
-                              Margin="7,0,4,0" />
-                  </TextBox.InnerLeftContent>
-                  <TextBox.InnerRightContent>
-                    <Button Classes="subtle" Padding="4" MinHeight="0" MinWidth="0"
-                            Margin="0,0,3,0" CornerRadius="4"
-                            Command="{Binding ClearSearchCommand}"
-                            IsVisible="{Binding SearchQuery.Length}">
-                      <PathIcon Data="{StaticResource Icon.Dismiss}" Width="10" Height="10"
-                                Foreground="{DynamicResource Brush.TextTertiary}" />
-                    </Button>
-                  </TextBox.InnerRightContent>
-                </TextBox>
-              </Border>
               <ListBox Classes="sidebar-list" Margin="14,12,14,8"
                        SelectedIndex="{Binding SelectedPageIndex, Mode=TwoWay}"
                        SelectionMode="Single">
@@ -1095,6 +961,10 @@
                               DataContext="{Binding OnboardingVM}" />
       </Grid>
     </Panel>
+
+    <!-- ═══ Search Overlay (Command Palette) ═══ -->
+    <views:SearchOverlay x:Name="SearchOverlay"
+                         DataContext="{Binding SearchOverlayVM}" />
 
     <!-- ═══ Rename Dialog Overlay ═══ -->
     <Panel x:Name="RenameOverlay" IsVisible="False">

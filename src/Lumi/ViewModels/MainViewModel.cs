@@ -58,6 +58,7 @@ public partial class MainViewModel : ObservableObject
     public McpServersViewModel McpServersVM { get; }
     public SettingsViewModel SettingsVM { get; }
     public OnboardingViewModel OnboardingVM { get; }
+    public SearchOverlayViewModel SearchOverlayVM { get; }
 
     /// <summary>The browser service used for Settings cookie import/clear.</summary>
     public BrowserService SettingsBrowserService => _settingsBrowserService;
@@ -103,6 +104,7 @@ public partial class MainViewModel : ObservableObject
         MemoriesVM = new MemoriesViewModel(dataStore);
         McpServersVM = new McpServersViewModel(dataStore);
         SettingsVM = new SettingsViewModel(dataStore, copilotService, _settingsBrowserService);
+        SearchOverlayVM = new SearchOverlayViewModel(dataStore, () => SelectedNavIndex);
 
         // When the chat model selector changes the global default, sync it to SettingsVM
         ChatVM.DefaultModelChanged += model =>
