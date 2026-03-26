@@ -45,6 +45,7 @@ public partial class MainWindow : Window
     private TextBox? _renameTextBox;
     private StackPanel? _projectFilterBar;
     private ScrollViewer? _projectFilterScroller;
+    private ScrollViewer? _chatListScroller;
     private readonly List<(Project Project, PropertyChangedEventHandler Handler)> _projectFilterHandlers = [];
     private ChatView? _chatView;
     private BrowserView? _browserView;
@@ -226,6 +227,10 @@ public partial class MainWindow : Window
         _projectFilterScroller = this.FindControl<ScrollViewer>("ProjectFilterScroller");
         if (_projectFilterScroller is not null)
             _projectFilterScroller.PointerWheelChanged += OnProjectFilterScrollerWheel;
+
+        _chatListScroller = this.FindControl<ScrollViewer>("ChatListScroller");
+        if (_chatListScroller is not null)
+            _chatListScroller.ScrollChanged += OnChatListScrollChanged;
 
         _chatView = this.FindControl<ChatView>("PageChat");
         _browserHost = this.FindControl<ContentControl>("BrowserHost");
@@ -1636,6 +1641,15 @@ public partial class MainWindow : Window
         _projectFilterScroller.Offset = _projectFilterScroller.Offset.WithX(
             _projectFilterScroller.Offset.X - e.Delta.Y * 50);
         e.Handled = true;
+    }
+
+    private void OnChatListScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (_chatListScroller is null || DataContext is not MainViewModel vm || !vm.HasMoreChats) return;
+
+        var distanceFromBottom = _chatListScroller.Extent.Height - _chatListScroller.Viewport.Height - _chatListScroller.Offset.Y;
+        if (distanceFromBottom < 100)
+            vm.LoadMoreChats();
     }
 
     private void RebuildProjectFilterBar(MainViewModel vm)

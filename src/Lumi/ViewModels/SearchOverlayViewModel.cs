@@ -136,7 +136,7 @@ public partial class SearchOverlayViewModel : ObservableObject
                 Category = g.Key,
                 CategoryIcon = g.First().CategoryIcon,
                 IsCurrentTab = g.First().NavIndex == currentNav,
-                Items = g.OrderBy(r => r.Priority).ThenBy(r => r.Title).Take(8).ToList()
+                Items = g.OrderBy(r => r.Priority).ThenBy(r => r.Title).Take(20).ToList()
             })
             .OrderByDescending(g => g.IsCurrentTab)
             .ThenBy(g => g.Category)
@@ -155,7 +155,7 @@ public partial class SearchOverlayViewModel : ObservableObject
         var results = new List<SearchResultItem>();
         var chats = _dataStore.Data.Chats;
 
-        foreach (var chat in chats.OrderByDescending(c => c.UpdatedAt).Take(100))
+        foreach (var chat in chats.OrderByDescending(c => c.UpdatedAt))
         {
             int? priority = null;
 

@@ -26,6 +26,10 @@ public partial class MainViewModel : ObservableObject
     private readonly BrowserService _settingsBrowserService;
     private bool _isRefreshingCopilotState;
 
+    private const int ChatPageSize = 50;
+    private int _chatLoadLimit = ChatPageSize;
+    [ObservableProperty] private bool _hasMoreChats;
+
     [ObservableProperty] private int _selectedNavIndex;
     [ObservableProperty] private bool _isDarkTheme = true;
     [ObservableProperty] private bool _isCompactDensity;
@@ -297,13 +301,28 @@ public partial class MainViewModel : ObservableObject
 
     public void RefreshChatList()
     {
+        _chatLoadLimit = ChatPageSize;
+        RebuildChatGroups();
+    }
+
+    public void LoadMoreChats()
+    {
+        if (!HasMoreChats) return;
+        _chatLoadLimit += ChatPageSize;
+        RebuildChatGroups();
+    }
+
+    private void RebuildChatGroups()
+    {
         var chats = _dataStore.Data.Chats.AsEnumerable();
 
         // Filter by project
         if (SelectedProjectFilter.HasValue)
             chats = chats.Where(c => c.ProjectId == SelectedProjectFilter.Value);
 
-        var ordered = chats.OrderByDescending(c => c.UpdatedAt).Take(50).ToList();
+        var allOrdered = chats.OrderByDescending(c => c.UpdatedAt).ToList();
+        HasMoreChats = allOrdered.Count > _chatLoadLimit;
+        var ordered = allOrdered.Take(_chatLoadLimit).ToList();
 
         // Group by time period
         var now = DateTimeOffset.Now;

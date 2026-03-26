@@ -345,7 +345,7 @@
                   <StackPanel x:Name="ProjectFilterBar" Orientation="Horizontal" Spacing="4" />
                 </ScrollViewer>
               </Border>
-              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+              <ScrollViewer x:Name="ChatListScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                             Classes="hover-scroll" Margin="0,8,0,0">
                 <ItemsControl x:Name="ChatGroupsHost" ItemsSource="{Binding ChatGroups}" Margin="6,0,6,8">
                   <ItemsControl.ItemTemplate>
