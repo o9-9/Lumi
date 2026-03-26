@@ -712,30 +712,9 @@ public partial class ChatViewModel
 
                         if (success)
                         {
-                            // Track fetched skills for attachment to the assistant message
-                            if (toolName == "fetch_skill")
-                            {
-                                string? skillName = null;
-                                try
-                                {
-                                    using var doc = JsonDocument.Parse(toolMsg.Content);
-                                    if (doc.RootElement.TryGetProperty("name", out var nameProp))
-                                        skillName = nameProp.GetString();
-                                }
-                                catch { }
-                                if (!string.IsNullOrEmpty(skillName))
-                                {
-                                    var skill = FindSkillByName(skillName);
-                                    _transcriptBuilder.PendingFetchedSkillRefs.Add(new SkillReference
-                                    {
-                                        Name = skillName,
-                                        Glyph = skill?.IconGlyph ?? "\u26A1",
-                                        Description = skill?.Description ?? string.Empty
-                                    });
-                                }
-                            }
+                            // fetch_skill tracking is handled by TranscriptBuilder.ProcessToolMessage()
 
-                            if ((ToolDisplayHelper.IsFileCreationTool(toolName) || toolName == "powershell")
+                            if((ToolDisplayHelper.IsFileCreationTool(toolName) || toolName == "powershell")
                                 && toolEnd.Data.Result?.Contents is { Length: > 0 } contents)
                             {
                                 foreach (var item in contents)
