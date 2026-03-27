@@ -247,7 +247,10 @@ public partial class ChatView : UserControl
         if (Math.Abs(delta) < 0.5)
             return;
 
-        if (TurnHasStreamingContent(turn))
+        // During active streaming ScrollToEnd() manages positioning — skip
+        // compensation for all turns (not just the streaming one) to avoid
+        // scroll-position fights that cause visible jumps.
+        if (TurnHasStreamingContent(turn) || _subscribedVm is { IsBusy: true })
             return;
 
         var control = FindRealizedTurnControl(turn.StableId);

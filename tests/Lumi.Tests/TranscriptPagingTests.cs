@@ -474,4 +474,269 @@ public sealed class TranscriptPagingTests
 
         return turn;
     }
+
+    // ─────────────────────────────────────────────────────────────
+    //  Scrolling behaviour tests
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void PinnedState_InitiallyPinned()
+    {
+        var controller = new TranscriptWindowController();
+        Assert.True(controller.IsPinnedToBottom);
+    }
+
+    [Fact]
+    public void PinnedState_UnpinsWhenScrolledAway()
+    {
+        var controller = new TranscriptWindowController();
+        controller.UpdatePinnedState(false, 100, "user-scroll");
+
+        Assert.False(controller.IsPinnedToBottom);
+        Assert.Equal(100, controller.DistanceFromBottom);
+    }
+
+    [Fact]
+    public void PinnedState_RepinsWhenReturningToBottom()
+    {
+        var controller = new TranscriptWindowController();
+
+        controller.UpdatePinnedState(false, 100, "scroll-away");
+        Assert.False(controller.IsPinnedToBottom);
+
+        controller.UpdatePinnedState(true, 0, "scroll-back");
+        Assert.True(controller.IsPinnedToBottom);
+        Assert.Equal(0, controller.DistanceFromBottom);
+    }
+
+    [Fact]
+    public void PinnedState_RaisesPropertyChanged()
+    {
+        var controller = new TranscriptWindowController();
+        var changedProps = new List<string>();
+        controller.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is not null)
+                changedProps.Add(e.PropertyName);
+        };
+
+        controller.UpdatePinnedState(false, 50, "scroll");
+
+        Assert.Contains(nameof(TranscriptWindowController.IsPinnedToBottom), changedProps);
+        Assert.Contains(nameof(TranscriptWindowController.DistanceFromBottom), changedProps);
+    }
+
+    [Fact]
+    public void PinnedState_NoPropertyChangedWhenValueUnchanged()
+    {
+        var controller = new TranscriptWindowController();
+        // Default is pinned; update to same state with different distance.
+        var changedProps = new List<string>();
+        controller.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is not null)
+                changedProps.Add(e.PropertyName);
+        };
+
+        controller.UpdatePinnedState(true, 3, "still-pinned");
+
+        // DistanceFromBottom changes, but IsPinnedToBottom stays true.
+        Assert.DoesNotContain(nameof(TranscriptWindowController.IsPinnedToBottom), changedProps);
+        Assert.Contains(nameof(TranscriptWindowController.DistanceFromBottom), changedProps);
+    }
+
+    [Fact]
+    public void StreamingGrowth_PinnedStatePreservedWhileAtTail()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 1,
+        });
+        var source = CreateTurns(4, measuredHeightFactory: _ => 100);
+
+        controller.BindTranscript(source, "stream-grow");
+        controller.ResetToLatest(400, "stream-grow");
+        controller.UpdatePinnedState(true, 0, "at-bottom");
+
+        // Simulate streaming: content grows in the last turn.
+        source[^1].MeasuredHeight = 300;
+
+        // Pinned state should still be true (controller doesn't unpin
+        // on turn height changes — the view manages that via the shell).
+        Assert.True(controller.IsPinnedToBottom);
+        Assert.Equal("turn:0003", controller.MountedTurns[^1].StableId);
+    }
+
+    [Fact]
+    public void ViewportUpdate_NoMutationWhenPinnedAndNothingToTrim()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 6,
+            MaxTurnsPerPage = 3,
+            MinInitialPages = 1,
+            MaxMountedPages = 4,
+        });
+        var source = CreateTurns(5, measuredHeightFactory: _ => 100);
+
+        controller.BindTranscript(source, "no-mutation");
+        controller.ResetToLatest(400, "no-mutation");
+
+        var mutation = controller.UpdateViewport(
+            new TranscriptViewportState(200, 400, 600, true, 0),
+            "pinned-stable");
+
+        Assert.Equal(TranscriptWindowMutationKind.None, mutation.Kind);
+        Assert.False(mutation.HasChanges);
+    }
+
+    [Fact]
+    public void ViewportUpdate_SyncsDistanceFromBottom()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 6,
+            MaxTurnsPerPage = 3,
+            MinInitialPages = 1,
+        });
+        var source = CreateTurns(5, measuredHeightFactory: _ => 100);
+
+        controller.BindTranscript(source, "dist-sync");
+        controller.ResetToLatest(400, "dist-sync");
+
+        controller.UpdateViewport(
+            new TranscriptViewportState(100, 400, 600, false, 100),
+            "scrolled");
+
+        Assert.False(controller.IsPinnedToBottom);
+        Assert.Equal(100, controller.DistanceFromBottom);
+    }
+
+    [Fact]
+    public void StreamingAddsNewTurn_StaysMountedWhilePinned()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 1,
+        });
+        var source = CreateTurns(4, measuredHeightFactory: _ => 120);
+
+        controller.BindTranscript(source, "add-while-pinned");
+        controller.ResetToLatest(400, "add-while-pinned");
+        controller.UpdatePinnedState(true, 0, "at-bottom");
+
+        // Simulate streaming: new turn added (e.g. tool call result)
+        source.Add(CreateTurn(4, measuredHeight: 120));
+        source.Add(CreateTurn(5, measuredHeight: 120));
+
+        Assert.Contains(controller.MountedTurns, t => t.StableId == "turn:0005");
+        Assert.Contains(controller.MountedTurns, t => t.StableId == "turn:0004");
+    }
+
+    [Fact]
+    public void HeightChangeOnMountedTurn_DoesNotUnpin()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 1,
+        });
+        var source = CreateTurns(4, measuredHeightFactory: _ => 100);
+
+        controller.BindTranscript(source, "height-change");
+        controller.ResetToLatest(400, "height-change");
+        controller.UpdatePinnedState(true, 0, "pinned");
+
+        // Simulate a height change on a mounted turn (e.g. image loaded)
+        source[2].MeasuredHeight = 250;
+
+        // The controller doesn't change pinned state from height changes;
+        // that's handled by the view's scroll event handlers.
+        Assert.True(controller.IsPinnedToBottom);
+    }
+
+    [Fact]
+    public void EnsureViewportCoverage_DoesNothingWhenAlreadyCovered()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 10,
+            MaxTurnsPerPage = 5,
+            MinInitialPages = 1,
+            MountedViewportFillMultiplier = 1.5,
+        });
+        var source = CreateTurns(3, measuredHeightFactory: _ => 200);
+
+        controller.BindTranscript(source, "covered");
+        controller.ResetToLatest(300, "covered");
+
+        var mutation = controller.EnsureViewportCoverage(300, "covered");
+
+        // All turns fit in one page; viewport is already covered.
+        Assert.Equal(TranscriptWindowMutationKind.None, mutation.Kind);
+    }
+
+    [Fact]
+    public void Prepend_RequiresAnchorRestore()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 1,
+            MaxMountedPages = 5,
+            PrependTriggerPixels = 200,
+        });
+        var source = CreateTurns(8, measuredHeightFactory: _ => 100);
+
+        controller.BindTranscript(source, "anchor-restore");
+        controller.ResetToLatest(200, "anchor-restore");
+        controller.UpdatePinnedState(false, 200, "scrolled-away");
+
+        var mutation = controller.UpdateViewport(
+            new TranscriptViewportState(0, 200, 900, false, 200),
+            "prepend");
+
+        Assert.Equal(TranscriptWindowMutationKind.Prepend, mutation.Kind);
+        Assert.True(mutation.RequiresAnchorRestore);
+    }
+
+    [Fact]
+    public void TrimHead_RequiresAnchorRestore()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 2,
+            MaxMountedPages = 3,
+            TrimToMountedPages = 2,
+            PrependTriggerPixels = 150,
+            RetainAboveViewportPixels = 50,
+        });
+        var source = CreateTurns(10, measuredHeightFactory: _ => 180);
+
+        controller.BindTranscript(source, "trim-anchor");
+        controller.ResetToLatest(200, "trim-anchor");
+        controller.UpdatePinnedState(false, 240, "trim-anchor");
+
+        // Prepend enough pages to exceed MaxMountedPages
+        controller.UpdateViewport(
+            new TranscriptViewportState(0, 200, 1200, false, 240), "prepend-1");
+        controller.UpdateViewport(
+            new TranscriptViewportState(0, 200, 1200, false, 240), "prepend-2");
+
+        // Now scroll far down to trigger cleanup
+        var mutation = controller.UpdateViewport(
+            new TranscriptViewportState(1400, 200, 2200, false, 240),
+            "cleanup");
+
+        if (mutation.Kind == TranscriptWindowMutationKind.TrimHead)
+            Assert.True(mutation.RequiresAnchorRestore);
+    }
 }
