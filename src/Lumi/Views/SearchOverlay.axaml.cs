@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Animation;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
@@ -27,6 +28,7 @@ public partial class SearchOverlay : UserControl
     private int _lastRenderedSelection = -1;
     private long _lastAnimateOpenTick;
     private SearchOverlayViewModel? _subscribedVm;
+    private Transitions? _stratumLineTransitions;
 
     public SearchOverlay()
     {
@@ -39,6 +41,7 @@ public partial class SearchOverlay : UserControl
         _scrim = this.FindControl<Border>("Scrim");
         _searchCard = this.FindControl<Border>("SearchCard");
         _stratumLine = this.FindControl<Border>("StratumLine");
+        _stratumLineTransitions = _stratumLine?.Transitions;
         _searchInput = this.FindControl<TextBox>("SearchInput");
         _resultsList = this.FindControl<ItemsControl>("ResultsList");
         _emptyState = this.FindControl<TextBlock>("EmptyState");
@@ -64,9 +67,10 @@ public partial class SearchOverlay : UserControl
             if (_searchCard is not null) _searchCard.Opacity = 0;
             if (_scrim is not null) _scrim.Opacity = 0;
 
-            // Reset stratum line to collapsed state
+            // Reset stratum line to collapsed state (bypass transitions for instant reset)
             if (_stratumLine is not null)
             {
+                _stratumLine.Transitions = null;
                 _stratumLine.Opacity = 0;
                 _stratumLine.RenderTransform = TransformOperations.Parse("scaleX(0)");
             }
@@ -261,6 +265,7 @@ public partial class SearchOverlay : UserControl
             {
                 await Task.Delay(100);
                 if (_stratumLine is null) return;
+                _stratumLine.Transitions = _stratumLineTransitions;
                 _stratumLine.Opacity = 1;
                 _stratumLine.RenderTransform = TransformOperations.Parse("scaleX(1)");
             });
