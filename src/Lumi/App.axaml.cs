@@ -36,10 +36,27 @@ public partial class App : Application
             var copilotService = new CopilotService();
             var vm = new MainViewModel(dataStore, copilotService, Program.ForceOnboarding);
 
-            // Dispose CopilotService (stops the CLI process) on app shutdown
-            desktop.ShutdownRequested += async (_, _) =>
+            // Save data and dispose CopilotService on app shutdown.
+            // The window is already hidden at this point so nothing blocks the user.
+            // Task.Run avoids deadlocking the UI thread if _writeLock is held by
+            // an in-flight fire-and-forget save that needs the dispatcher to complete.
+            desktop.ShutdownRequested += (_, _) =>
             {
-                await copilotService.DisposeAsync();
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        await dataStore.SaveAsync(cts.Token);
+                    }
+                    catch { }
+
+                    try
+                    {
+                        await copilotService.DisposeAsync();
+                    }
+                    catch { }
+                }).GetAwaiter().GetResult();
             };
 
             // Apply saved theme before showing the window

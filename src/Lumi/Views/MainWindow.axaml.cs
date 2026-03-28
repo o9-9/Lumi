@@ -81,6 +81,7 @@ public partial class MainWindow : Window
     private int _hoveredNavIndex = -1;
     private int _pendingNavHoverIndex = -1;
     private bool _isNavPillWidthLocked;
+
     private double[] _navBaseButtonWidths = [];
     private double[] _navMinButtonWidths = [];
     private MainViewModel? _wiredVm;
@@ -265,7 +266,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        SaveWindowBounds();
+        CaptureBoundsToSettings();
         base.OnClosing(e);
     }
 
@@ -353,14 +354,17 @@ public partial class MainWindow : Window
             WindowState = WindowState.Maximized;
     }
 
-    private void SaveWindowBounds()
+    /// <summary>
+    /// Captures current window bounds into settings without persisting to disk.
+    /// Must be called on the UI thread while the window is still visible.
+    /// </summary>
+    private void CaptureBoundsToSettings()
     {
         if (DataContext is not MainViewModel vm) return;
         var settings = vm.DataStore.Data.Settings;
 
         settings.IsMaximized = WindowState == WindowState.Maximized;
 
-        // Save the normal (non-maximized) bounds so restore works correctly
         if (WindowState == WindowState.Normal)
         {
             settings.WindowWidth = Width;
@@ -371,8 +375,6 @@ public partial class MainWindow : Window
             settings.WindowLeft = Position.X / scaling;
             settings.WindowTop = Position.Y / scaling;
         }
-
-        vm.DataStore.Save();
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

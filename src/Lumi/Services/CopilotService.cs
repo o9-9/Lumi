@@ -729,6 +729,12 @@ public class CopilotService : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (_client is not null)
-            await _client.DisposeAsync();
+        {
+            try
+            {
+                await _client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch { /* CLI process didn't stop in time — abandon it */ }
+        }
     }
 }
