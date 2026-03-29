@@ -17,7 +17,7 @@ internal sealed class UiThrottler(Action action, TimeSpan minimumInterval, Dispa
     private CancellationTokenSource? _delayCts;
 
     public UiThrottler(Action action, TimeSpan minimumInterval)
-        : this(action, minimumInterval, DispatcherPriority.Background)
+        : this(action, minimumInterval, DispatcherPriority.Normal)
     {
     }
 
@@ -92,16 +92,24 @@ internal sealed class UiThrottler(Action action, TimeSpan minimumInterval, Dispa
         {
             if (delay > TimeSpan.Zero)
                 await Task.Delay(delay, token).ConfigureAwait(false);
+
+            if (token.IsCancellationRequested)
+                return;
+
+            Dispatcher.UIThread.Post(() => Flush(token), _priority);
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException)
         {
-            return;
+            // Token was cancelled — the caller has already scheduled a replacement.
         }
-
-        if (token.IsCancellationRequested)
-            return;
-
-        Dispatcher.UIThread.Post(() => Flush(token), _priority);
+        catch
+        {
+            // Unexpected error — reset _scheduled so future requests aren't permanently blocked.
+            lock (_gate)
+            {
+                _scheduled = false;
+            }
+        }
     }
 
     private void Flush(CancellationToken token)

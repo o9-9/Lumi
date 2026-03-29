@@ -365,6 +365,8 @@ public partial class ChatViewModel
 
         var sessionSubscription = session.On(evt =>
         {
+            try
+            {
             switch (evt)
             {
                 case AssistantTurnStartEvent:
@@ -1389,6 +1391,28 @@ public partial class ChatViewModel
                     StatusText = runtime.StatusText;
                     });
                     break;
+            }
+            }
+            catch (Exception ex)
+            {
+                // Never let an unhandled exception escape the event handler — the SDK
+                // stops delivering events to a faulted subscriber, which would leave
+                // IsStreaming/IsBusy stuck permanently.
+                System.Diagnostics.Debug.WriteLine($"[Lumi] Session event handler error: {ex}");
+                Dispatcher.UIThread.Post(() =>
+                {
+                    runtime.IsBusy = false;
+                    runtime.IsStreaming = false;
+                    runtime.StatusText = string.Format(Loc.Status_Error, ex.Message);
+                    if (_activeSession == session)
+                    {
+                        IsBusy = false;
+                        IsStreaming = false;
+                        StatusText = runtime.StatusText;
+                        _transcriptBuilder.HideTypingIndicator();
+                        _transcriptBuilder.CloseCurrentToolGroup();
+                    }
+                });
             }
         });
         _sessionSubs[chat.Id] = new DisposableGroup(
