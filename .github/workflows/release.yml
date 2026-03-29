@@ -71,6 +71,7 @@ jobs:
           -v ${{ inputs.version }}
           -p publish
           --mainExe Lumi.exe
+          --icon src/Lumi/Assets/lumi-icon.ico
 
       - name: Sign Setup.exe
         uses: azure/trusted-signing-action@v0.5.0
