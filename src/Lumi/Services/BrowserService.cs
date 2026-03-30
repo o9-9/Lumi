@@ -18,7 +18,7 @@ namespace Lumi.Services;
 /// Manages an embedded WebView2 browser instance and exposes automation tool methods
 /// that the LLM can invoke (navigate, click, type, screenshot, JS eval, etc.).
 /// </summary>
-public sealed class BrowserService : IAsyncDisposable
+public sealed partial class BrowserService : IAsyncDisposable
 {
     // Shared environment so all per-chat instances share cookies/sessions
     private static CoreWebView2Environment? _sharedEnvironment;
@@ -1034,8 +1034,8 @@ public sealed class BrowserService : IAsyncDisposable
         List<StepDef>? steps;
         try
         {
-            steps = System.Text.Json.JsonSerializer.Deserialize<List<StepDef>>(stepsJson,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            steps = System.Text.Json.JsonSerializer.Deserialize(stepsJson,
+                StepDefJsonContext.Default.ListStepDef);
         }
         catch (Exception ex)
         {
@@ -1095,6 +1095,11 @@ public sealed class BrowserService : IAsyncDisposable
         public string? Target { get; set; }
         public string? Value { get; set; }
     }
+
+    [System.Text.Json.Serialization.JsonSerializable(typeof(List<StepDef>))]
+    [System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
+    private sealed partial class StepDefJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
+
 
     private async Task<string> DoClickAsync(string? target)
     {

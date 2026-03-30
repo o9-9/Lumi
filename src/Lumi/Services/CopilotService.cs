@@ -150,6 +150,7 @@ public class CopilotService : IAsyncDisposable
             StreamJsonRpc.JsonRpc? jsonRpc = null;
 
             // Primary: Process.Exited — fires instantly when the OS process terminates
+#pragma warning disable IL2075 // Reflection on non-annotated type — CliProcess/Rpc are internal SDK properties
             var processProp = result.GetType().GetProperty("CliProcess", bf);
             if (processProp?.GetValue(result) is Process cliProcess)
             {
@@ -161,6 +162,7 @@ public class CopilotService : IAsyncDisposable
 
             // Backup: JsonRpc.Disconnected — fires on RPC transport breaks
             var rpcProp = result.GetType().GetProperty("Rpc", bf);
+#pragma warning restore IL2075
             if (rpcProp?.GetValue(result) is StreamJsonRpc.JsonRpc rpc)
             {
                 jsonRpc = rpc;
@@ -400,21 +402,19 @@ public class CopilotService : IAsyncDisposable
         // Read both stdout and stderr — CLI may write to either
         var outputTask = Task.Run(async () =>
         {
-            while (!process.StandardOutput.EndOfStream)
+            string? line;
+            while ((line = await process.StandardOutput.ReadLineAsync(ct)) is not null)
             {
-                var line = await process.StandardOutput.ReadLineAsync(ct);
-                if (line is not null)
-                    ProcessLine(line);
+                ProcessLine(line);
             }
         }, ct);
 
         var errorTask = Task.Run(async () =>
         {
-            while (!process.StandardError.EndOfStream)
+            string? line;
+            while ((line = await process.StandardError.ReadLineAsync(ct)) is not null)
             {
-                var line = await process.StandardError.ReadLineAsync(ct);
-                if (line is not null)
-                    ProcessLine(line);
+                ProcessLine(line);
             }
         }, ct);
 

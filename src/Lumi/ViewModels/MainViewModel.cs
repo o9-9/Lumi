@@ -99,10 +99,10 @@ public partial class MainViewModel : ObservableObject
 
             // Sync GitHub auth state if user signed in during onboarding
             if (LoginVM.IsAuthenticated)
-                _ = SettingsVM.RefreshAuthStatusAsync();
+                _ = SettingsVM?.RefreshAuthStatusAsync();
 
             // Refresh memories in case learning created some
-            ChatVM.RefreshComposerCatalogs();
+            ChatVM?.RefreshComposerCatalogs();
         };
         OnboardingVM.ThemeChanged += isDark => IsDarkTheme = isDark;
 
