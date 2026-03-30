@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
+using CommunityToolkit.Mvvm.Input;
 using GitHub.Copilot.SDK;
 using Lumi.Localization;
 using Lumi.Models;
@@ -52,6 +53,69 @@ public partial class ChatViewModel
         var subagentAssistantStreams = new Dictionary<string, StreamingTextAccumulator>(StringComparer.Ordinal);
         var subagentReasoningStreams = new Dictionary<string, StreamingTextAccumulator>(StringComparer.Ordinal);
         string? mostRecentSubagentToolCallId = null;
+
+        // Subscribe to CLI process exit — fires instantly when the process is killed,
+        // unlike SDK events which go silent on crash.
+        var cliExitGeneration = _copilotService.ConnectionGeneration;
+        var cliExitHandled = 0;
+        void OnCliProcessExited(long exitedGeneration)
+        {
+            if (exitedGeneration != cliExitGeneration) return;
+            if (Interlocked.CompareExchange(ref cliExitHandled, 1, 0) != 0) return;
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!runtime.IsBusy) return;
+
+                ClearPendingTurnTracking(chat.Id);
+                assistantStream?.CancelPending();
+                reasoningStream?.CancelPending();
+
+                if (streamingMsg is not null)
+                {
+                    _inProgressMessages.Remove(chat.Id);
+                    if (_activeSession == session && streamingVm is not null)
+                        Messages.Remove(streamingVm);
+                    streamingMsg = null;
+                    streamingVm = null;
+                }
+                assistantStream?.Clear();
+
+                if (reasoningMsg is not null)
+                {
+                    reasoningMsg.IsStreaming = false;
+                    if (_activeSession == session)
+                        reasoningVm?.NotifyStreamingEnded();
+                    reasoningMsg = null;
+                    reasoningVm = null;
+                }
+                reasoningStream?.Clear();
+
+                runtime.IsBusy = false;
+                runtime.IsStreaming = false;
+                runtime.StatusText = "";
+                if (_activeSession == session)
+                {
+                    IsBusy = false;
+                    IsStreaming = false;
+                    StatusText = "";
+                    _transcriptBuilder.HideTypingIndicator();
+                    _transcriptBuilder.CloseCurrentToolGroup();
+                    _transcriptBuilder.FlushPendingFileEdits();
+
+                    _transcriptBuilder.AddConnectionLostError(
+                        "Connection to Copilot was lost.",
+                        new RelayCommand(() => _ = RetryAfterConnectionLossAsync()));
+                    ScrollToEndRequested?.Invoke();
+                }
+
+                DetachSessionAfterRemoteShutdown(chat, wasActive: _activeSession == session);
+                QueueSaveChat(chat, saveIndex: true, releaseIfInactive: CurrentChat?.Id != chat.Id, touchIndex: true);
+
+                _ = TryReconnectCopilotAsync(default);
+            });
+        }
+        _copilotService.CliProcessExited += OnCliProcessExited;
 
 
         bool IsSubagentOutputActive()
@@ -937,6 +1001,12 @@ public partial class ChatViewModel
                     ResetSubagentOutputState();
                     Dispatcher.UIThread.Post(() =>
                     {
+                    // Skip if CLI crash handler already claimed cleanup
+                    if (Volatile.Read(ref cliExitHandled) == 1)
+                    {
+                        QueueSaveChat(chat, saveIndex: false, releaseIfInactive: CurrentChat?.Id != chat.Id);
+                        return;
+                    }
                     // Clean up any in-progress streaming message
                     if (streamingMsg is not null)
                     {
@@ -1424,7 +1494,8 @@ public partial class ChatViewModel
         _sessionSubs[chat.Id] = new DisposableGroup(
             sessionSubscription,
             assistantStream,
-            reasoningStream);
+            reasoningStream,
+            new ActionDisposable(() => _copilotService.CliProcessExited -= OnCliProcessExited));
     }
 
     /// <summary>Cleans up session resources for a chat (e.g., on delete).</summary>

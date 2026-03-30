@@ -487,6 +487,12 @@
                        Foreground="{DynamicResource Brush.DangerDefault}"
                        FontWeight="SemiBold" FontSize="13" />
           </StackPanel>
+          <Button Content="↻ Try again" Command="{Binding RetryCommand}"
+                  IsVisible="{Binding ShowRetryButton}"
+                  HorizontalAlignment="Left"
+                  Padding="12,6" FontSize="12" FontWeight="SemiBold"
+                  Background="{DynamicResource Brush.DangerDefault}"
+                  Foreground="White" CornerRadius="8" Cursor="Hand" />
         </StackPanel>
       </Border>
     </DataTemplate>

@@ -149,6 +149,24 @@ public class TranscriptBuilder
             ProcessChatMessage(msgVm, showTimestamps);
     }
 
+    /// <summary>Adds a connection-lost error item with an optional retry button.</summary>
+    public void AddConnectionLostError(string message, System.Windows.Input.ICommand? retryCommand)
+    {
+        var item = new ErrorMessageItem(message, Loc.Author_Lumi)
+        {
+            ShowRetryButton = retryCommand is not null,
+        };
+        if (retryCommand is not null)
+        {
+            item.RetryCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(() =>
+            {
+                item.ShowRetryButton = false;
+                retryCommand.Execute(null);
+            });
+        }
+        AppendToCurrentTurn(item, TranscriptIds.Create("error"));
+    }
+
     private void ProcessToolMessage(ChatMessageViewModel msgVm, bool showToolCalls, bool showTimestamps)
     {
         var toolName = msgVm.ToolName ?? "";

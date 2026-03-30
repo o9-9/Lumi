@@ -1101,19 +1101,25 @@ public partial class ChatViewModel : ObservableObject
         var targetChat = CurrentChat!;
 
         // Add user message immediately so it appears before async worktree creation
-        var userMsg = new ChatMessage
+        var isSilentRetry = _silentRetryPrompt is not null && prompt == _silentRetryPrompt;
+        _silentRetryPrompt = null;
+
+        if (!isSilentRetry)
         {
-            Role = "user",
-            Content = prompt,
-            Author = _dataStore.Data.Settings.UserName ?? Loc.Author_You,
-            Attachments = attachments?.Select(a => a.Path).ToList() ?? [],
-            ActiveSkills = BuildSkillReferences(ActiveSkillIds)
-        };
-        targetChat.Messages.Add(userMsg);
-        Messages.Add(new ChatMessageViewModel(userMsg));
-        QueueSaveChat(targetChat, saveIndex: true, touchIndex: true);
-        ChatUpdated?.Invoke();
-        UserMessageSent?.Invoke();
+            var userMsg = new ChatMessage
+            {
+                Role = "user",
+                Content = prompt,
+                Author = _dataStore.Data.Settings.UserName ?? Loc.Author_You,
+                Attachments = attachments?.Select(a => a.Path).ToList() ?? [],
+                ActiveSkills = BuildSkillReferences(ActiveSkillIds)
+            };
+            targetChat.Messages.Add(userMsg);
+            Messages.Add(new ChatMessageViewModel(userMsg));
+            QueueSaveChat(targetChat, saveIndex: true, touchIndex: true);
+            ChatUpdated?.Invoke();
+            UserMessageSent?.Invoke();
+        }
 
         // Lazily create the worktree after the user message is visible.
         // The typing indicator shows "Creating worktree…" as a typewriter,
@@ -1385,6 +1391,33 @@ public partial class ChatViewModel : ObservableObject
             return false;
         }
     }
+
+    /// <summary>Retries after a connection loss by sending "Try again" silently
+    /// (no visible user message bubble) so the conversation continues seamlessly.</summary>
+    private async Task RetryAfterConnectionLossAsync()
+    {
+        if (CurrentChat is null) return;
+
+        if (!_copilotService.IsConnected)
+        {
+            try { await _copilotService.ConnectAsync(); }
+            catch { StatusText = Loc.Status_CheckAccess; return; }
+        }
+
+        _silentRetryPrompt = "Try again";
+        PromptText = _silentRetryPrompt;
+        try
+        {
+            await SendMessage();
+        }
+        catch
+        {
+            _silentRetryPrompt = null;
+        }
+    }
+
+    /// <summary>When set, SendMessage skips adding the user message bubble.</summary>
+    private string? _silentRetryPrompt;
 
     private static bool AllowCreateSessionForSend(bool chatWasCreatedThisTurn)
         => chatWasCreatedThisTurn;

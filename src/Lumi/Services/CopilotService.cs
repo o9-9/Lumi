@@ -31,10 +31,15 @@ public class CopilotService : IAsyncDisposable
     private string? _fastestModelId;
     private long _connectionGeneration;
     private readonly SemaphoreSlim _connectGate = new(1, 1);
+    private Action? _cleanupProcessHandlers;
 
     /// <summary>Fires after the CopilotClient has been replaced (reconnection).
     /// Consumers should discard any cached CopilotSession objects.</summary>
     public event Action? Reconnected;
+
+    /// <summary>Fires when the CLI process exits unexpectedly.
+    /// Subscribers receive the connection generation at the time of the disconnect.</summary>
+    public event Action<long>? CliProcessExited;
 
     public bool IsConnected => _client?.State == ConnectionState.Connected;
 
@@ -76,6 +81,13 @@ public class CopilotService : IAsyncDisposable
             _models = null;
             _fastestModelId = null;
             Interlocked.Increment(ref _connectionGeneration);
+
+            // Unsubscribe old process/RPC handlers before subscribing new ones
+            _cleanupProcessHandlers?.Invoke();
+            _cleanupProcessHandlers = null;
+
+            // Watch the CLI process for unexpected exits
+            SubscribeToCliProcessExit(newClient);
         }
         finally
         {
@@ -106,6 +118,67 @@ public class CopilotService : IAsyncDisposable
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>Uses reflection to reach the SDK's internal Process and JsonRpc
+    /// objects and subscribes to their exit/disconnect events. Fires <see cref="CliProcessExited"/>
+    /// when the CLI process dies or the RPC transport breaks.</summary>
+    private void SubscribeToCliProcessExit(CopilotClient client)
+    {
+        try
+        {
+            var bf = System.Reflection.BindingFlags.Instance
+                   | System.Reflection.BindingFlags.NonPublic
+                   | System.Reflection.BindingFlags.Public;
+
+            // Path: CopilotClient._connectionTask.Result → Connection
+            var connTaskField = client.GetType().GetField("_connectionTask", bf);
+            if (connTaskField?.GetValue(client) is not Task connTask || !connTask.IsCompletedSuccessfully)
+                return;
+
+            var result = connTask.GetType().GetProperty("Result")?.GetValue(connTask);
+            if (result is null) return;
+
+            var gen = ConnectionGeneration;
+            var fired = 0;
+            void FireOnce() { if (Interlocked.CompareExchange(ref fired, 1, 0) == 0) CliProcessExited?.Invoke(gen); }
+
+            EventHandler? processHandler = null;
+            Process? process = null;
+            EventHandler<StreamJsonRpc.JsonRpcDisconnectedEventArgs>? rpcHandler = null;
+            StreamJsonRpc.JsonRpc? jsonRpc = null;
+
+            // Primary: Process.Exited — fires instantly when the OS process terminates
+            var processProp = result.GetType().GetProperty("CliProcess", bf);
+            if (processProp?.GetValue(result) is Process cliProcess)
+            {
+                process = cliProcess;
+                processHandler = (_, _) => FireOnce();
+                cliProcess.EnableRaisingEvents = true;
+                cliProcess.Exited += processHandler;
+            }
+
+            // Backup: JsonRpc.Disconnected — fires on RPC transport breaks
+            var rpcProp = result.GetType().GetProperty("Rpc", bf);
+            if (rpcProp?.GetValue(result) is StreamJsonRpc.JsonRpc rpc)
+            {
+                jsonRpc = rpc;
+                rpcHandler = (_, _) => FireOnce();
+                rpc.Disconnected += rpcHandler;
+            }
+
+            _cleanupProcessHandlers = () =>
+            {
+                if (process is not null && processHandler is not null)
+                    process.Exited -= processHandler;
+                if (jsonRpc is not null && rpcHandler is not null)
+                    jsonRpc.Disconnected -= rpcHandler;
+            };
+        }
+        catch
+        {
+            // Reflection failed — SDK internals may have changed. Not fatal.
         }
     }
 

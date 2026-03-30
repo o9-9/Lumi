@@ -203,8 +203,10 @@ public partial class ErrorMessageItem : TranscriptItem
 {
     [ObservableProperty] private string _content;
     [ObservableProperty] private string _timestampText;
+    [ObservableProperty] private bool _showRetryButton;
 
     public string? Author { get; }
+    public ICommand? RetryCommand { get; set; }
 
     public ErrorMessageItem(ChatMessageViewModel source, bool showTimestamps)
         : base($"message:error:{source.Message.Id}")
