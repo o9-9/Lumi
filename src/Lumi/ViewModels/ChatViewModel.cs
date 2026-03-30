@@ -198,6 +198,9 @@ public partial class ChatViewModel : ObservableObject
     public event Action? ScrollToEndRequested;
     public event Action? UserMessageSent;
     public event Action? ChatUpdated;
+
+    /// <summary>Test-only helper to raise ChatUpdated without sending a real message.</summary>
+    internal void RaiseChatUpdatedForTest() => ChatUpdated?.Invoke();
     public event Action<Guid, string>? ChatTitleChanged;
     public event Action? BrowserHideRequested;
     /// <summary>Raised when a file-edit tool wants to show a diff in the preview island.</summary>
@@ -1092,7 +1095,6 @@ public partial class ChatViewModel : ObservableObject
             needsWorktreeCreation = IsWorktreeMode && WorktreePath is null;
             if (_dataStore.Data.Settings.AutoGenerateTitles)
                 _ = GenerateTitleForChatAsync(chat, prompt);
-            ChatUpdated?.Invoke();
         }
 
         // Capture before any async operations — CurrentChat may change if the user switches chats
@@ -1110,6 +1112,7 @@ public partial class ChatViewModel : ObservableObject
         targetChat.Messages.Add(userMsg);
         Messages.Add(new ChatMessageViewModel(userMsg));
         QueueSaveChat(targetChat, saveIndex: true, touchIndex: true);
+        ChatUpdated?.Invoke();
         UserMessageSent?.Invoke();
 
         // Lazily create the worktree after the user message is visible.
@@ -2230,6 +2233,7 @@ public partial class ChatViewModel : ObservableObject
         CurrentChat.Messages.Add(newUserMsg);
         Messages.Add(new ChatMessageViewModel(newUserMsg));
         QueueSaveChat(CurrentChat, saveIndex: true, touchIndex: true);
+        ChatUpdated?.Invoke();
         ScrollToEndRequested?.Invoke();
 
         // Resend
