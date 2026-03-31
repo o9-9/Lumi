@@ -2012,8 +2012,7 @@ public partial class ChatViewModel : ObservableObject
                     OnPropertyChanged(nameof(CurrentChatTitle));
                 // Only persist the title if the chat's message file already exists on disk.
                 // This prevents "ghost" index entries when the initial QueueSaveChat failed.
-                var chatFile = Path.Combine(DataStore.ChatsDir, $"{chat.Id}.json");
-                if (File.Exists(chatFile) && _dataStore.Data.Settings.AutoSaveChats)
+                if (HasPersistedChatFile(chat) && _dataStore.Data.Settings.AutoSaveChats)
                     _ = SaveIndexAsync();
                 ChatTitleChanged?.Invoke(chat.Id, chat.Title);
             });
@@ -2152,6 +2151,9 @@ public partial class ChatViewModel : ObservableObject
             // Best-effort persistence for UX responsiveness.
         }
     }
+
+    private static bool HasPersistedChatFile(Chat chat) =>
+        File.Exists(Path.Combine(DataStore.ChatsDir, $"{chat.Id}.json"));
 
     /// <summary>
     /// Picks the best model from a list of model IDs using name/version heuristics.

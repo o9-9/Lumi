@@ -990,7 +990,7 @@ public partial class ChatViewModel
                     _dataStore.MarkChatChanged(chat);
                     if (CurrentChat?.Id == chat.Id)
                         OnPropertyChanged(nameof(CurrentChatTitle));
-                    if (_dataStore.Data.Settings.AutoSaveChats)
+                    if (HasPersistedChatFile(chat) && _dataStore.Data.Settings.AutoSaveChats)
                         _ = SaveIndexAsync();
                     ChatTitleChanged?.Invoke(chat.Id, chat.Title);
                     });
