@@ -791,6 +791,9 @@ public class CopilotService : IAsyncDisposable
     {
         if (_client is null) return null;
 
+        // Suggestions are a lightweight UI affordance; keep them fast and isolated
+        // from the current chat's heavier model/effort selection.
+        var fastModel = await GetFastestModelIdAsync(ct).ConfigureAwait(false);
         var context = string.IsNullOrWhiteSpace(userMessage)
             ? assistantMessage
             : $"User: {userMessage}\n\nAssistant: {assistantMessage}";
@@ -801,41 +804,80 @@ public class CopilotService : IAsyncDisposable
 
         var session = await _client.CreateSessionAsync(new SessionConfig
         {
-            Streaming = true,
+            Model = fastModel,
+            Streaming = false,
             SystemMessage = new SystemMessageConfig
             {
                 Content = "You generate follow-up suggestions for a chat assistant. Given the conversation below, produce exactly 3 short follow-up messages the user might want to send next. Each suggestion must be concise (under 60 characters) and contextually relevant. Output ONLY a JSON array of 3 strings, nothing else. Example: [\"Tell me more\", \"How do I implement this?\", \"What are the alternatives?\"]",
                 Mode = SystemMessageMode.Replace
             },
             AvailableTools = [],
+            ExcludedTools = ["*"],
             OnPermissionRequest = PermissionHandler.ApproveAll,
-        }, ct);
+        }, ct).ConfigureAwait(false);
 
         try
         {
             var result = await session.SendAndWaitAsync(
-                new MessageOptions { Prompt = context },
-                TimeSpan.FromSeconds(15), ct);
-            var raw = result?.Data?.Content?.Trim();
-            if (string.IsNullOrWhiteSpace(raw)) return null;
-
-            // Strip markdown code fences if present (e.g., ```json ... ```)
-            if (raw.StartsWith("```"))
-            {
-                var firstNewline = raw.IndexOf('\n');
-                if (firstNewline > 0) raw = raw[(firstNewline + 1)..];
-                if (raw.EndsWith("```")) raw = raw[..^3];
-                raw = raw.Trim();
-            }
-
-            // Parse the JSON array
-            var suggestions = System.Text.Json.JsonSerializer.Deserialize(
-                raw, Lumi.Models.AppDataJsonContext.Default.ListString);
-            return suggestions?.Count > 0 ? suggestions : null;
+                 new MessageOptions { Prompt = context },
+                 TimeSpan.FromSeconds(20), ct).ConfigureAwait(false);
+            return ParseSuggestions(result?.Data?.Content);
         }
         finally
         {
-            await session.DisposeAsync();
+            await session.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static List<string>? ParseSuggestions(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        raw = raw.Trim();
+
+        // Strip markdown code fences if present (e.g., ```json ... ```)
+        if (raw.StartsWith("```", StringComparison.Ordinal))
+        {
+            var firstNewline = raw.IndexOf('\n');
+            if (firstNewline > 0)
+                raw = raw[(firstNewline + 1)..];
+            if (raw.EndsWith("```", StringComparison.Ordinal))
+                raw = raw[..^3];
+            raw = raw.Trim();
+        }
+
+        var suggestions = TryDeserializeSuggestions(raw);
+        if (suggestions is null)
+        {
+            var arrayStart = raw.IndexOf('[');
+            var arrayEnd = raw.LastIndexOf(']');
+            if (arrayStart >= 0 && arrayEnd > arrayStart)
+                suggestions = TryDeserializeSuggestions(raw[arrayStart..(arrayEnd + 1)]);
+        }
+
+        if (suggestions is null || suggestions.Count == 0)
+            return null;
+
+        var normalized = suggestions
+            .Where(static s => !string.IsNullOrWhiteSpace(s))
+            .Select(static s => s.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .Take(3)
+            .ToList();
+
+        return normalized.Count > 0 ? normalized : null;
+    }
+
+    private static List<string>? TryDeserializeSuggestions(string raw)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(raw, Lumi.Models.AppDataJsonContext.Default.ListString);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
