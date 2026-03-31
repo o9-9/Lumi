@@ -684,6 +684,45 @@ public class CopilotService : IAsyncDisposable
         public string UserName;
     }
 
+    /// <summary>Generates a short chat title using a lightweight session with the fastest model.</summary>
+    public async Task<string?> GenerateTitleAsync(string userMessage, CancellationToken ct = default)
+    {
+        if (_client is null) return null;
+
+        var fastModel = await GetFastestModelIdAsync(ct).ConfigureAwait(false);
+        var systemContent = $"""
+            Generate a short title (3-6 words) for a chat that starts with this message. Output ONLY the title text, nothing else.
+
+            User: {Truncate(userMessage, 500)}
+            """;
+
+        var session = await _client.CreateSessionAsync(new SessionConfig
+        {
+            Model = fastModel,
+            Streaming = false,
+            SystemMessage = new SystemMessageConfig
+            {
+                Content = systemContent,
+                Mode = SystemMessageMode.Replace
+            },
+            AvailableTools = [],
+            ExcludedTools = ["*"],
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        }, ct).ConfigureAwait(false);
+
+        try
+        {
+            var result = await session.SendAndWaitAsync(
+                new MessageOptions { Prompt = "title:" },
+                TimeSpan.FromSeconds(15), ct).ConfigureAwait(false);
+            return result?.Data?.Content?.Trim().Trim('"', '\'', '.', '!');
+        }
+        finally
+        {
+            await session.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
     private static string Truncate(string text, int maxLength) =>
         text.Length <= maxLength ? text : text[..maxLength];
 

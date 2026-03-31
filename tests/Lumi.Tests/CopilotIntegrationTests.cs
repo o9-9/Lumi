@@ -711,11 +711,13 @@ public class CopilotIntegrationTests : IAsyncLifetime
     // ═══════════════════════════════════════════════════════════════════════
 
     [SkippableFact]
-    public void TitleGeneration_RemovedInFavorOfSessionTitleChangedEvent()
+    public async Task TitleGeneration_ProducesTitle()
     {
-        // GenerateTitleAsync was removed; title generation now relies on
-        // the SDK's SessionTitleChangedEvent, tested via ChatViewModel.
-        Skip.If(true, "GenerateTitleAsync removed — title comes from SessionTitleChangedEvent");
+        SkipIfDisabled();
+
+        var title = await _service.GenerateTitleAsync("How do I make sourdough starter?");
+        Assert.False(string.IsNullOrWhiteSpace(title));
+        Assert.True(title!.Length <= 80, $"Title too long: {title}");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
