@@ -201,7 +201,7 @@ public sealed class TranscriptPagingTests
 
         var snapshot = controller.CaptureSnapshot();
         Assert.False(snapshot.IsPinnedToBottom);
-        Assert.Equal("turn:0004", controller.MountedTurns[^1].StableId);
+        Assert.Equal("turn:0003", controller.MountedTurns[^1].StableId);
     }
 
     [Fact]
@@ -292,6 +292,34 @@ public sealed class TranscriptPagingTests
         Assert.True(controller.CaptureSnapshot().MountedPageCount <= 3);
         Assert.Equal("turn:0000", mountedIds[0]);
         Assert.DoesNotContain("turn:0016", mountedIds);
+    }
+
+    [Fact]
+    public void StreamingWhileReaderStillWithinTailWindow_DoesNotPullMountedWindowForward()
+    {
+        var controller = new TranscriptWindowController(new TranscriptPagingOptions
+        {
+            MaxPageWeight = 4,
+            MaxTurnsPerPage = 2,
+            MinInitialPages = 1,
+            MaxMountedPages = 3,
+        });
+        var source = CreateTurns(8, measuredHeightFactory: _ => 100);
+
+        controller.BindTranscript(source, "reader-tail-window");
+        controller.ResetToLatest(200, "reader-tail-window");
+        controller.UpdatePinnedState(false, 1000, "reader-tail-window");
+
+        var mountedBefore = controller.MountedTurns.Select(static turn => turn.StableId).ToArray();
+        Assert.Equal(new[] { "turn:0004", "turn:0005", "turn:0006", "turn:0007" }, mountedBefore);
+
+        source.Add(CreateTurn(8, measuredHeight: 100));
+        source.Add(CreateTurn(9, measuredHeight: 100));
+
+        var mountedAfter = controller.MountedTurns.Select(static turn => turn.StableId).ToArray();
+        Assert.Equal(mountedBefore, mountedAfter);
+        Assert.DoesNotContain("turn:0008", mountedAfter);
+        Assert.DoesNotContain("turn:0009", mountedAfter);
     }
 
     [Fact]

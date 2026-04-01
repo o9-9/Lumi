@@ -16,6 +16,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Lumi.Localization;
+using Lumi.Models;
 using Lumi.ViewModels;
 using StrataTheme.Controls;
 
@@ -31,6 +32,7 @@ public partial class ChatView : UserControl
     private ScrollViewer? _transcriptScrollViewer;
 
     private ChatViewModel? _subscribedVm;
+    private Chat? _lastObservedCurrentChat;
     private ObservableCollection<TranscriptTurn>? _subscribedMountedTurns;
     private Border? _worktreeHighlight;
     private Button? _localToggleBtn;
@@ -39,6 +41,8 @@ public partial class ChatView : UserControl
     private bool _resizeRestoreQueued;
     private bool _viewportEvaluationQueued;
     private bool _viewportEvaluationRequested;
+    private bool _heightCompensationQueued;
+    private double _pendingHeightCompensationDelta;
     private ScrollAnchorState? _pendingResizeAnchor;
     private readonly Dictionary<string, double> _observedTurnHeights = new(StringComparer.Ordinal);
     private readonly HashSet<TranscriptTurn> _heightSubscribedTurns = new();
@@ -137,10 +141,15 @@ public partial class ChatView : UserControl
         base.OnDataContextChanged(e);
         UnsubscribeFromViewModel();
         ResetSearchState();
+        _pendingHeightCompensationDelta = 0;
+        _heightCompensationQueued = false;
+        _viewportEvaluationRequested = false;
+        _lastObservedCurrentChat = null;
 
         if (DataContext is ChatViewModel vm)
         {
             _subscribedVm = vm;
+            _lastObservedCurrentChat = vm.CurrentChat;
             vm.ScrollToEndRequested += OnScrollToEndRequested;
             vm.UserMessageSent += OnUserMessageSent;
             vm.TranscriptRebuilt += OnTranscriptRebuilt;
@@ -186,6 +195,7 @@ public partial class ChatView : UserControl
         _subscribedVm.CopyToClipboardRequested -= OnCopyToClipboardRequested;
         _subscribedVm.FocusComposerRequested -= FocusComposer;
         _subscribedVm = null;
+        _lastObservedCurrentChat = null;
     }
 
     private void SubscribeToMountedTurns(ObservableCollection<TranscriptTurn> mountedTurns)
@@ -220,6 +230,7 @@ public partial class ChatView : UserControl
         }
 
         _chatShell.TranscriptViewportChanged += OnTranscriptViewportChanged;
+        _chatShell.JumpToLatestRequested += OnJumpToLatestRequested;
         _transcriptScrollViewer.SizeChanged += OnTranscriptViewportSizeChanged;
     }
 
@@ -229,7 +240,10 @@ public partial class ChatView : UserControl
             return;
 
         if (_chatShell is not null)
+        {
             _chatShell.TranscriptViewportChanged -= OnTranscriptViewportChanged;
+            _chatShell.JumpToLatestRequested -= OnJumpToLatestRequested;
+        }
         _transcriptScrollViewer.SizeChanged -= OnTranscriptViewportSizeChanged;
         _transcriptScrollViewer = null;
     }
@@ -314,9 +328,12 @@ public partial class ChatView : UserControl
         if (point.Value.Y + control.Bounds.Height > 0)
             return;
 
-        var beforeOffset = _chatShell.VerticalOffset;
-        _chatShell.ScrollToVerticalOffset(beforeOffset + delta);
-        _subscribedVm?.RecordTranscriptScrollCompensation("height-change", beforeOffset, _chatShell.VerticalOffset);
+        _pendingHeightCompensationDelta += delta;
+        if (_heightCompensationQueued)
+            return;
+
+        _heightCompensationQueued = true;
+        Dispatcher.UIThread.Post(ApplyPendingHeightCompensation, DispatcherPriority.Loaded);
     }
 
     private void OnScrollToEndRequested() => _chatShell?.ScrollToEnd();
@@ -329,12 +346,48 @@ public partial class ChatView : UserControl
         _subscribedVm.UpdateTranscriptPinnedState(_chatShell.IsPinnedToBottom, _chatShell.CurrentDistanceFromBottom);
     }
 
+    private void ApplyPendingHeightCompensation()
+    {
+        _heightCompensationQueued = false;
+
+        if (_chatShell is null || _subscribedVm is null)
+        {
+            _pendingHeightCompensationDelta = 0;
+            return;
+        }
+
+        if (_isApplyingTranscriptMutation)
+        {
+            _heightCompensationQueued = true;
+            Dispatcher.UIThread.Post(ApplyPendingHeightCompensation, DispatcherPriority.Loaded);
+            return;
+        }
+
+        var delta = _pendingHeightCompensationDelta;
+        _pendingHeightCompensationDelta = 0;
+        if (Math.Abs(delta) < 0.5 || _subscribedVm.IsBusy || _chatShell.IsPinnedToBottom)
+            return;
+
+        var beforeOffset = _chatShell.VerticalOffset;
+        _chatShell.ScrollToVerticalOffset(beforeOffset + delta);
+        _subscribedVm.RecordTranscriptScrollCompensation("height-change", beforeOffset, _chatShell.VerticalOffset);
+    }
+
+    private void OnJumpToLatestRequested() => JumpToLatest(focusComposer: false);
+
+    private void JumpToLatest(bool focusComposer)
+    {
+        _subscribedVm?.EnsureLatestTranscriptMounted();
+        _chatShell?.JumpToLatest();
+        Dispatcher.UIThread.Post(SyncTranscriptPinnedState, DispatcherPriority.Loaded);
+
+        if (focusComposer)
+            Dispatcher.UIThread.Post(FocusComposer, DispatcherPriority.Input);
+    }
+
     private void OnUserMessageSent()
     {
-        _chatShell?.ResetAutoScroll();
-        _subscribedVm?.EnsureLatestTranscriptMounted();
-        _chatShell?.ScrollToEnd();
-        Dispatcher.UIThread.Post(FocusComposer, DispatcherPriority.Input);
+        JumpToLatest(focusComposer: true);
     }
 
     private async void OnTranscriptRebuilt()
@@ -349,23 +402,15 @@ public partial class ChatView : UserControl
         var chatShell = _chatShell;
         var viewModel = _subscribedVm;
 
-        chatShell.ResetAutoScroll();
+        chatShell.EnterFollowTailMode();
         viewModel.InitializeMountedTranscript(chatShell.ViewportHeight);
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
         viewModel.EnsureMountedTranscriptCoverage(chatShell.ViewportHeight);
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
-        chatShell.ScrollToEnd();
+        chatShell.JumpToLatest();
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
         SyncTranscriptPinnedState();
         FocusComposer();
-
-        // After ScrollToEnd settles, adjust if the user message is barely hidden.
-        // Only for completed chats — don't fight auto-scroll during streaming.
-        if (!viewModel.IsBusy)
-        {
-            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Loaded);
-            AdjustScrollAfterTurnCompleted();
-        }
 
         // Re-execute search if active (mounted turns changed)
         if (!string.IsNullOrWhiteSpace(_searchInput?.Text))
@@ -374,52 +419,33 @@ public partial class ChatView : UserControl
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ChatViewModel.CurrentChat) && _subscribedVm?.CurrentChat is not null)
-            _chatShell?.ResetAutoScroll();
+        if (e.PropertyName == nameof(ChatViewModel.CurrentChat))
+        {
+            var currentChat = _subscribedVm?.CurrentChat;
+            var chatReferenceChanged = !ReferenceEquals(currentChat, _lastObservedCurrentChat);
+            _lastObservedCurrentChat = currentChat;
+
+            if (chatReferenceChanged && currentChat is not null)
+                _chatShell?.EnterFollowTailMode();
+        }
 
         if (e.PropertyName == nameof(ChatViewModel.IsWorktreeMode))
             UpdateWorktreeToggleHighlight();
-
-        // After a turn completes, nudge the scroll position so the user's
-        // message isn't hidden just above the viewport.
-        if (e.PropertyName == nameof(ChatViewModel.IsBusy) && _subscribedVm is { IsBusy: false })
-            Dispatcher.UIThread.Post(AdjustScrollAfterTurnCompleted, DispatcherPriority.Loaded);
-    }
-
-    /// <summary>
-    /// When a short exchange (user message + few tool calls + response) barely
-    /// exceeds the viewport, the streaming auto-scroll pushes the user message
-    /// just above the visible area. Detect this and scroll back to show the
-    /// full exchange.
-    /// </summary>
-    private void AdjustScrollAfterTurnCompleted()
-    {
-        if (_chatShell is null || _transcriptScrollViewer is null)
-            return;
-
-        var offset = _transcriptScrollViewer.Offset.Y;
-        if (offset <= 0)
-            return;
-
-        // Only adjust when the transcript was auto-scrolled to the bottom
-        // (user didn't scroll away during the turn).
-        if (_chatShell.CurrentDistanceFromBottom > 20)
-            return;
-
-        // If the scroll offset from the top is small, the first user message
-        // is likely just barely above the viewport. A user message bubble is
-        // typically ~150px; with padding and spacing the first turn occupies
-        // roughly ~200px. Use a generous threshold to cover varied layouts.
-        if (offset <= 350)
-            _chatShell.ScrollToVerticalOffset(0);
     }
 
     private void OnTranscriptViewportChanged(object? sender, StrataTranscriptViewportChangedEventArgs e)
     {
-        if (_isApplyingTranscriptMutation || _subscribedVm is null)
+        if (_subscribedVm is null)
             return;
 
         _subscribedVm.UpdateTranscriptPinnedState(e.IsPinnedToBottom, e.DistanceFromBottom);
+
+        if (_isApplyingTranscriptMutation)
+        {
+            _viewportEvaluationRequested = true;
+            return;
+        }
+
         if (e.IsPinnedToBottom)
             return;
 
@@ -550,6 +576,8 @@ public partial class ChatView : UserControl
         finally
         {
             _isApplyingTranscriptMutation = false;
+            if (_viewportEvaluationRequested && _chatShell is { IsPinnedToBottom: false })
+                QueueTranscriptViewportEvaluation();
         }
     }
 

@@ -529,6 +529,7 @@ internal sealed class TranscriptWindowController : ObservableObject, IDisposable
         var wasMountedToLatestTail = previousPageCount > 0
             && _lastMountedPageIndex >= 0
             && _lastMountedPageIndex >= previousPageCount - 1;
+        var shouldTrackLatestTail = IsPinnedToBottom && wasMountedToLatestTail;
         RebuildPages();
 
         if (_pages.Count == 0)
@@ -546,7 +547,7 @@ internal sealed class TranscriptWindowController : ObservableObject, IDisposable
             return;
         }
 
-        if (wasMountedToLatestTail)
+        if (shouldTrackLatestTail)
         {
             _lastMountedPageIndex = _pages.Count - 1;
             TrimMountedHeadOverflow();
