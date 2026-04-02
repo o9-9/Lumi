@@ -744,7 +744,7 @@
     <!-- ── Question card ────────────────────────────── -->
     <DataTemplate DataType="vm:QuestionItem">
       <sc:StrataQuestionCard Question="{Binding Question}"
-                             Options="{Binding Options}"
+                             OptionsList="{Binding OptionsList}"
                              AllowFreeText="{Binding AllowFreeText}"
                              AllowMultiSelect="{Binding AllowMultiSelect}"
                              SelectedAnswer="{Binding SelectedAnswer, Mode=TwoWay}"

@@ -155,7 +155,7 @@ public partial class OnboardingViewModel : ObservableObject
 
     public event Action? OnboardingCompleted;
     public event Action<bool>? ThemeChanged;
-    /// <summary>Raised when the agent asks a question. Payload: (question, comma-separated options).</summary>
+    /// <summary>Raised when the agent asks a question. Payload: (question, options as JSON array string).</summary>
     public event Action<string, string>? QuestionAsked;
 
     public bool CanContinueToLearn => !string.IsNullOrWhiteSpace(UserName);
@@ -440,9 +440,12 @@ public partial class OnboardingViewModel : ObservableObject
             // Ask the user a question
             AIFunctionFactory.Create(
                 async ([Description("A clear, engaging question to ask the user")] string question,
-                       [Description("Comma-separated list of suggested answer options (3-5 options)")] string options) =>
+                       [Description("List of suggested answer options (3-5 options)")] string[] options) =>
                 {
-                    return await AskUserQuestionAsync(question, options, ct);
+                    var optionsJson = System.Text.Json.JsonSerializer.Serialize(
+                        new System.Collections.Generic.List<string>(options ?? Array.Empty<string>()),
+                        Lumi.Models.AppDataJsonContext.Default.ListString);
+                    return await AskUserQuestionAsync(question, optionsJson, ct);
                 },
                 "ask_user",
                 "Ask the user a question with clickable answer options. The user sees a visual card with buttons. Use this to learn about their preferences, work, and interests."),

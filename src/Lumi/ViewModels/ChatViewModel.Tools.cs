@@ -563,7 +563,7 @@ public partial class ChatViewModel
     {
         return AIFunctionFactory.Create(
             async ([Description("The question to ask the user")] string question,
-             [Description("Comma-separated list of option labels for the user to choose from")] string options,
+             [Description("List of option labels for the user to choose from")] string[] options,
              [Description("Whether to allow the user to type a free-text answer in addition to the options. Default: true")] bool? allowFreeText,
              [Description("Whether the user can select multiple options (and optionally type free text) before confirming. When true and allowFreeText is also true, the user can combine option selections with custom typed entries. Default: false")] bool? allowMultiSelect) =>
             {
@@ -572,12 +572,14 @@ public partial class ChatViewModel
                 var questionId = Guid.NewGuid().ToString("N");
                 var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _pendingQuestions[questionId] = tcs;
+                IList<string> optionsList = options ?? Array.Empty<string>();
+                var optionsJson = System.Text.Json.JsonSerializer.Serialize(optionsList.ToList(), Lumi.Models.AppDataJsonContext.Default.ListString);
 
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (CurrentChat?.Id != chatId) return;
-                    _transcriptBuilder.AddQuestionToTranscript(questionId, question, options, freeText, multiSelect);
-                    QuestionAsked?.Invoke(questionId, question, options, freeText);
+                    _transcriptBuilder.AddQuestionToTranscript(questionId, question, optionsList, freeText, multiSelect);
+                    QuestionAsked?.Invoke(questionId, question, optionsJson, freeText);
                     ScrollToEndRequested?.Invoke();
                 });
 
@@ -603,7 +605,7 @@ public partial class ChatViewModel
                         }
                         toolMsg.QuestionId = questionId;
                         toolMsg.QuestionText = question;
-                        toolMsg.QuestionOptions = options;
+                        toolMsg.QuestionOptions = optionsJson;
                         toolMsg.QuestionAllowFreeText = freeText;
                         toolMsg.QuestionAllowMultiSelect = multiSelect;
                     }

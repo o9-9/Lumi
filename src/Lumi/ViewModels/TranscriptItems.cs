@@ -538,19 +538,21 @@ public partial class QuestionItem : TranscriptItem
     public string QuestionId { get; }
     [ObservableProperty] private string _question;
     [ObservableProperty] private string _options;
+    [ObservableProperty] private IList<string>? _optionsList;
     [ObservableProperty] private bool _allowFreeText;
     [ObservableProperty] private bool _allowMultiSelect;
     [ObservableProperty] private string? _selectedAnswer;
     [ObservableProperty] private bool _isAnswered;
     [ObservableProperty] private bool _isExpired;
 
-    public QuestionItem(string questionId, string question, string options, bool allowFreeText,
+    public QuestionItem(string questionId, string question, IList<string> optionsList, bool allowFreeText,
         Action<string, string>? submitAction = null, bool allowMultiSelect = false)
         : base($"question:{questionId}")
     {
         QuestionId = questionId;
         _question = question;
-        _options = options;
+        _options = string.Join(",", optionsList);
+        _optionsList = optionsList;
         _allowFreeText = allowFreeText;
         _allowMultiSelect = allowMultiSelect;
         _submitAction = submitAction;

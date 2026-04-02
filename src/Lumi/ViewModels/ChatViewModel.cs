@@ -215,7 +215,7 @@ public partial class ChatViewModel : ObservableObject
     /// <summary>Raised to hide the plan preview island.</summary>
     public event Action? PlanHideRequested;
 
-    /// <summary>Raised when the LLM calls ask_question. Args: questionId, question, options (comma-separated), allowFreeText.</summary>
+    /// <summary>Raised when the LLM calls ask_question. Args: questionId, question, options (JSON array string), allowFreeText.</summary>
     public event Action<string, string, string, bool>? QuestionAsked;
 
     /// <summary>Pending question completions keyed by question ID.</summary>
@@ -563,14 +563,15 @@ public partial class ChatViewModel : ObservableObject
             var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingQuestions[questionId] = tcs;
 
-            var optionsStr = request.Choices is { Count: > 0 } ? string.Join(",", request.Choices) : "";
+            var optionsList = request.Choices is { Count: > 0 } ? (IList<string>)request.Choices : Array.Empty<string>();
+            var optionsJson = System.Text.Json.JsonSerializer.Serialize(optionsList.ToList(), Lumi.Models.AppDataJsonContext.Default.ListString);
             var freeText = request.AllowFreeform ?? true;
 
             Dispatcher.UIThread.Post(() =>
             {
                 if (CurrentChat?.Id != inputHandlerChatId) return;
-                _transcriptBuilder.AddQuestionToTranscript(questionId, request.Question, optionsStr, freeText);
-                QuestionAsked?.Invoke(questionId, request.Question, optionsStr, freeText);
+                _transcriptBuilder.AddQuestionToTranscript(questionId, request.Question, optionsList, freeText);
+                QuestionAsked?.Invoke(questionId, request.Question, optionsJson, freeText);
                 ScrollToEndRequested?.Invoke();
             });
 
@@ -596,7 +597,7 @@ public partial class ChatViewModel : ObservableObject
                     }
                     toolMsg.QuestionId = questionId;
                     toolMsg.QuestionText = request.Question;
-                    toolMsg.QuestionOptions = optionsStr;
+                    toolMsg.QuestionOptions = optionsJson;
                     toolMsg.QuestionAllowFreeText = freeText;
                     toolMsg.QuestionAllowMultiSelect = false;
                 }

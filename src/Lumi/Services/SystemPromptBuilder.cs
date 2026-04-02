@@ -291,7 +291,7 @@ public static class SystemPromptBuilder
             ## Interactive Questions
             You have an `ask_question(question, options, allowFreeText)` tool that presents the user with a visual card containing clickable options. Use it when you need the user to choose between alternatives — for example, picking a template, confirming a direction, selecting one of several options, or clarifying ambiguity.
             - `question`: The question text displayed as the card title.
-            - `options`: Comma-separated option labels (e.g. "Option A,Option B,Option C").
+            - `options`: Array of option label strings (e.g. ["Option A", "Option B", "Option C"]).
             - `allowFreeText`: Whether to show a free-text input (default true). Set to false for strict choices.
             Don't overuse this — only ask when the choice genuinely affects the outcome. For simple yes/no or when the user's intent is clear, just proceed.
 

@@ -126,7 +126,7 @@ public partial class OnboardingView : UserControl
             var card = new StrataQuestionCard
             {
                 Question = question,
-                Options = options,
+                OptionsList = TranscriptBuilder.ParseOptionsList(options),
                 AllowFreeText = true,
                 AllowMultiSelect = true,
                 HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,

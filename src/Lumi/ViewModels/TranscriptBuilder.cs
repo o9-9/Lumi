@@ -193,6 +193,7 @@ public class TranscriptBuilder
                     ?? ToolDisplayHelper.ExtractJsonField(msgVm.Content, "question") ?? "";
                 var opts = msg.QuestionOptions
                     ?? ToolDisplayHelper.ExtractJsonField(msgVm.Content, "options") ?? "";
+                var optionsList = ParseOptionsList(opts);
                 var freeText = msg.QuestionAllowFreeText
                     ?? string.Equals(ToolDisplayHelper.ExtractJsonField(msgVm.Content, "allowFreeText"), "true", StringComparison.OrdinalIgnoreCase);
                 var multiSelect = msg.QuestionAllowMultiSelect
@@ -207,7 +208,7 @@ public class TranscriptBuilder
                 CloseCurrentToolGroup();
                 var isAnswered = !string.IsNullOrEmpty(answer);
                 var isExpired = !isAnswered && msg.ToolStatus is "Completed" or "Failed";
-                var card = new QuestionItem(qid, question, opts, freeText && !isAnswered && !isExpired, _submitQuestionAnswerAction, multiSelect && !isAnswered && !isExpired);
+                var card = new QuestionItem(qid, question, optionsList, freeText && !isAnswered && !isExpired, _submitQuestionAnswerAction, multiSelect && !isAnswered && !isExpired);
                 if (isAnswered)
                 {
                     card.SelectedAnswer = answer;
@@ -1330,10 +1331,10 @@ public class TranscriptBuilder
             target.Output = target.Output + "\n" + output;
     }
 
-    public void AddQuestionToTranscript(string questionId, string question, string options, bool allowFreeText, bool allowMultiSelect = false)
+    public void AddQuestionToTranscript(string questionId, string question, IList<string> optionsList, bool allowFreeText, bool allowMultiSelect = false)
     {
         CloseCurrentToolGroup();
-        var card = new QuestionItem(questionId, question, options, allowFreeText, _submitQuestionAnswerAction, allowMultiSelect);
+        var card = new QuestionItem(questionId, question, optionsList, allowFreeText, _submitQuestionAnswerAction, allowMultiSelect);
         AppendToCurrentTurn(card, TurnStableIdFor($"question:{questionId}"));
     }
 
@@ -1406,6 +1407,36 @@ public class TranscriptBuilder
     }
 
     private static string TurnStableIdFor(string seed) => $"turn:{seed}";
+
+    /// <summary>
+    /// Parses an options string into a list. Supports JSON array format (new) and
+    /// comma-separated format (legacy) for backward compatibility.
+    /// </summary>
+    internal static IList<string> ParseOptionsList(string? options)
+    {
+        if (string.IsNullOrWhiteSpace(options))
+            return Array.Empty<string>();
+
+        var trimmed = options.Trim();
+        if (trimmed.StartsWith('['))
+        {
+            try
+            {
+                var parsed = System.Text.Json.JsonSerializer.Deserialize(trimmed, Models.AppDataJsonContext.Default.ListString);
+                if (parsed is not null)
+                    return parsed;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Malformed JSON — fall through to comma split
+            }
+        }
+
+        return trimmed.Split(',')
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0)
+            .ToList();
+    }
 
     private void RemovePendingHandler(ChatMessageViewModel vm, PropertyChangedEventHandler? handler)
     {
